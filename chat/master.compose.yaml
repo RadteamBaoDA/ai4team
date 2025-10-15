@@ -1,0 +1,63 @@
+services:
+  web:
+    container_name: openwebui
+    restart: always
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - 3011:8080
+    env_file: .env.master
+    environment:
+      - WEBUI_URL=https://chat.baoda.live
+    volumes:
+      - ./openwebui-data:/app/backend/data
+    depends_on:
+      - db
+      - redis
+      - vectordb
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - openwebui
+  db:
+    container_name: openwebui-db
+    image: postgres:17
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=openwebui
+      - POSTGRES_DB=openwebui_db
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ./postgresql/data:/var/lib/postgresql/data
+    depends_on:
+      - redis
+    networks:
+      - openwebui
+  redis:
+    container_name: openwebui-redis
+    image: redis:latest
+    restart: always
+    ports: 
+      - 6379:6379
+    networks:
+      - openwebui
+
+  vectordb:
+    container_name: openwebui-vectordb
+    image: qdrant/qdrant
+    restart: always
+    ports:
+      - "6333:6333" # For API access
+      - "6334:6334" # For gRPC access
+      - "6335:6335" # For cluster communication
+    volumes:
+      - ./qdrant/storage:/qdrant/storage
+      - ./qdrant/config:/qdrant/config
+      - ./qdrant/snapshots:/qdrant/snapshots
+    networks:
+      - openwebui
+    depends_on:
+      - redis
+networks:
+  openwebui:
+    driver: bridge

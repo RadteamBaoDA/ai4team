@@ -1,0 +1,19 @@
+services:
+  web:
+    container_name: openwebui
+    restart: always
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - 3011:8080
+    env_file: .env.slave
+    environment:
+      - WEBUI_URL=https://chat.baoda.live
+    volumes:
+      - ./openwebui-data:/app/backend/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - openwebui
+networks:
+  openwebui:
+    driver: bridge
