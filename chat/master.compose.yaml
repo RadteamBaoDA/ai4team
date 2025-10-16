@@ -7,7 +7,7 @@ services:
       - 3011:8080
     env_file: .env.master
     environment:
-      - WEBUI_URL=https://chat.baoda.live
+      - WEBUI_URL=https://chat1.baoda.live
     volumes:
       - ./openwebui-data:/app/backend/data
     depends_on:
@@ -16,12 +16,15 @@ services:
       - vectordb
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "s3.ai4team.vn:192.168.1.14"   # replace with actual master IP
     networks:
       - openwebui
   db:
     container_name: openwebui-db
     image: postgres:17
     restart: always
+    ports: 
+      - 5432:5432
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=openwebui

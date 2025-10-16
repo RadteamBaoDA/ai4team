@@ -7,11 +7,13 @@ services:
       - 3011:8080
     env_file: .env.slave
     environment:
-      - WEBUI_URL=https://chat.baoda.live
+      - WEBUI_URL=https://chat1.baoda.live
     volumes:
       - ./openwebui-data:/app/backend/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "master-chat:192.168.1.14"   # replace with actual master IP
+      - "s3.ai4team.vn:192.168.1.14"   # replace with actual master IP
     networks:
       - openwebui
 networks:
