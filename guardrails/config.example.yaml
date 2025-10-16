@@ -1,0 +1,78 @@
+# Ollama Guard Proxy Configuration
+# YAML configuration file for the Ollama Guard Proxy
+
+# Ollama Backend Configuration
+ollama_url: http://127.0.0.1:11434
+ollama_path: /api/generate
+
+# Proxy Server Configuration
+proxy_host: 0.0.0.0
+proxy_port: 8080
+
+# IP Access Control
+# Set enable_ip_filter to true to enforce IP-based access control
+enable_ip_filter: false
+
+# Whitelist: comma-separated list of allowed IP addresses or CIDR ranges
+# Example: "192.168.1.0/24, 10.0.0.1, 172.16.0.0/12"
+ip_whitelist: ""
+
+# Blacklist: comma-separated list of blocked IP addresses or CIDR ranges
+# Example: "192.168.1.100, 10.0.0.0/8"
+ip_blacklist: ""
+
+# LLM Guard Configuration
+enable_input_guard: true
+enable_output_guard: true
+
+# If true, any error during guard scanning will block the request
+# If false, errors are logged but requests are allowed
+block_on_guard_error: false
+
+# Input Scanner Configuration
+input_scanners:
+  ban_substrings:
+    enabled: true
+    substrings:
+      - "malicious"
+      - "dangerous"
+  
+  prompt_injection:
+    enabled: true
+  
+  toxicity:
+    enabled: true
+    threshold: 0.5
+  
+  secrets:
+    enabled: true
+  
+  code:
+    enabled: true
+  
+  token_limit:
+    enabled: true
+    limit: 4000
+
+# Output Scanner Configuration
+output_scanners:
+  ban_substrings:
+    enabled: true
+    substrings:
+      - "malicious"
+      - "dangerous"
+  
+  toxicity:
+    enabled: true
+    threshold: 0.5
+  
+  malicious_urls:
+    enabled: true
+  
+  no_refusal:
+    enabled: true
+
+# Logging Configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

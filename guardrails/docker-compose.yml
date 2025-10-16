@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    hostname: ollama
+    ports:
+      - "127.0.0.1:11434:11434"  # Only accessible from localhost by default
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - ollama_network
+
+  ollama-guard-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ollama-guard-proxy
+    hostname: ollama-guard-proxy
+    ports:
+      - "8080:8080"  # Proxy API endpoint
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_PATH=/api/generate
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=8080
+      - ENABLE_INPUT_GUARD=true
+      - ENABLE_OUTPUT_GUARD=true
+      - ENABLE_IP_FILTER=false
+      # Whitelist example: "192.168.0.0/16,10.0.0.0/8"
+      - IP_WHITELIST=
+      # Blacklist example: "192.168.1.100,10.0.0.5"
+      - IP_BLACKLIST=
+      - BLOCK_ON_GUARD_ERROR=false
+      - CONFIG_FILE=/app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    networks:
+      - ollama_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  ollama_data:
+    driver: local
+
+networks:
+  ollama_network:
+    driver: bridge
