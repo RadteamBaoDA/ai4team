@@ -21,6 +21,7 @@ Or with Uvicorn directly:
 import os
 import json
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import yaml
@@ -57,6 +58,120 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class LanguageDetector:
+    """Detect language from text and provide localized error messages."""
+    
+    # Language detection patterns
+    LANGUAGE_PATTERNS = {
+        'zh': {
+            'patterns': [r'[\u4e00-\u9fff]'],  # Chinese characters
+            'name': 'Chinese'
+        },
+        'vi': {
+            'patterns': [r'[\u0102\u0103\u0110\u0111\u0128\u0129\u0168\u0169\u01a0\u01a1\u01af\u01b0]'],  # Vietnamese diacritics
+            'name': 'Vietnamese'
+        },
+        'ja': {
+            'patterns': [r'[\u3040-\u309f\u30a0-\u30ff]'],  # Japanese hiragana/katakana
+            'name': 'Japanese'
+        },
+        'ko': {
+            'patterns': [r'[\uac00-\ud7af]'],  # Korean hangul
+            'name': 'Korean'
+        },
+        'ru': {
+            'patterns': [r'[\u0400-\u04ff]'],  # Cyrillic/Russian
+            'name': 'Russian'
+        },
+        'ar': {
+            'patterns': [r'[\u0600-\u06ff]'],  # Arabic
+            'name': 'Arabic'
+        },
+    }
+    
+    # Error messages by language
+    ERROR_MESSAGES = {
+        'zh': {
+            'prompt_blocked': '您的输入被安全扫描器阻止。原因: {reason}',
+            'prompt_blocked_detail': '输入包含不安全内容，无法处理。',
+            'response_blocked': '模型的输出被安全扫描器阻止。',
+            'server_error': '服务器内部错误。',
+            'upstream_error': '上游服务错误。',
+        },
+        'vi': {
+            'prompt_blocked': 'Đầu vào của bạn bị chặn bởi bộ quét bảo mật. Lý do: {reason}',
+            'prompt_blocked_detail': 'Đầu vào chứa nội dung không an toàn, không thể xử lý.',
+            'response_blocked': 'Đầu ra của mô hình bị chặn bởi bộ quét bảo mật.',
+            'server_error': 'Lỗi máy chủ nội bộ.',
+            'upstream_error': 'Lỗi dịch vụ hạ nguồn.',
+        },
+        'ja': {
+            'prompt_blocked': 'あなたの入力はセキュリティスキャナーによってブロックされました。理由: {reason}',
+            'prompt_blocked_detail': '入力に安全でないコンテンツが含まれているため、処理できません。',
+            'response_blocked': 'モデルの出力はセキュリティスキャナーによってブロックされました。',
+            'server_error': 'サーバー内部エラー。',
+            'upstream_error': 'アップストリームサービスエラー。',
+        },
+        'ko': {
+            'prompt_blocked': '입력이 보안 스캐너에 의해 차단되었습니다. 이유: {reason}',
+            'prompt_blocked_detail': '입력에 안전하지 않은 내용이 포함되어 있어 처리할 수 없습니다.',
+            'response_blocked': '모델 출력이 보안 스캐너에 의해 차단되었습니다.',
+            'server_error': '서버 내부 오류입니다.',
+            'upstream_error': '업스트림 서비스 오류입니다.',
+        },
+        'ru': {
+            'prompt_blocked': 'Ваши входные данные заблокированы сканером безопасности. Причина: {reason}',
+            'prompt_blocked_detail': 'Входные данные содержат небезопасное содержание и не могут быть обработаны.',
+            'response_blocked': 'Вывод модели заблокирован сканером безопасности.',
+            'server_error': 'Ошибка внутреннего сервера.',
+            'upstream_error': 'Ошибка восходящего сервиса.',
+        },
+        'ar': {
+            'prompt_blocked': 'تم حظر مدخلاتك بواسطة ماسح الأمان. السبب: {reason}',
+            'prompt_blocked_detail': 'يحتوي الإدخال على محتوى غير آمن ولا يمكن معالجته.',
+            'response_blocked': 'تم حظر مخرجات النموذج بواسطة ماسح الأمان.',
+            'server_error': 'خطأ في الخادم الداخلي.',
+            'upstream_error': 'خطأ في الخدمة الأصلية.',
+        },
+        'en': {
+            'prompt_blocked': 'Your input was blocked by the security scanner. Reason: {reason}',
+            'prompt_blocked_detail': 'Input contains unsafe content and cannot be processed.',
+            'response_blocked': 'Model output was blocked by the security scanner.',
+            'server_error': 'Internal server error.',
+            'upstream_error': 'Upstream service error.',
+        }
+    }
+    
+    @staticmethod
+    def detect_language(text: str) -> str:
+        """Detect language from text. Returns language code or 'en' as default."""
+        if not text:
+            return 'en'
+        
+        for lang_code, lang_info in LanguageDetector.LANGUAGE_PATTERNS.items():
+            for pattern in lang_info['patterns']:
+                if re.search(pattern, text):
+                    logger.info(f"Detected language: {lang_info['name']}")
+                    return lang_code
+        
+        # Check for common English words
+        if re.search(r'\b(the|a|an|and|or|is|are|was|were|be|have|has|had)\b', text, re.IGNORECASE):
+            return 'en'
+        
+        return 'en'  # Default to English
+    
+    @staticmethod
+    def get_error_message(message_key: str, language: str, reason: str = '') -> str:
+        """Get localized error message."""
+        messages = LanguageDetector.ERROR_MESSAGES.get(language, LanguageDetector.ERROR_MESSAGES['en'])
+        message = messages.get(message_key, '')
+        
+        if reason and '{reason}' in message:
+            message = message.format(reason=reason)
+        
+        return message
 
 
 class Config:
@@ -274,6 +389,9 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
     # Extract prompt for scanning
     prompt = extract_text_from_payload(payload)
     
+    # Detect language from prompt
+    detected_lang = LanguageDetector.detect_language(prompt)
+    
     # Scan input
     if config.get('enable_input_guard', True):
         input_result = guard_manager.scan_input(
@@ -282,9 +400,29 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
         )
         if not input_result['allowed']:
             logger.warning(f"Input blocked: {input_result}")
+            
+            # Get scanner reason
+            reason = ', '.join([
+                f"{scanner_name}: {info.get('reason', 'Unknown')}"
+                for scanner_name, info in input_result.get('scanners', {}).items()
+                if not info.get('passed', True)
+            ])
+            
+            # Get localized error message
+            error_message = LanguageDetector.get_error_message(
+                'prompt_blocked',
+                detected_lang,
+                reason
+            )
+            
             raise HTTPException(
                 status_code=400,
-                detail={"error": "prompt_blocked", "details": input_result}
+                detail={
+                    "error": "prompt_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": input_result
+                }
             )
         logger.info(f"Input passed guards: {input_result['scanners']}")
     
@@ -297,9 +435,10 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
         resp = requests.post(url, json=payload, stream=True, timeout=300)
     except requests.RequestException as e:
         logger.error(f"Upstream error: {e}")
+        error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
         raise HTTPException(
             status_code=502,
-            detail={"error": "upstream_error", "message": str(e)}
+            detail={"error": "upstream_error", "message": error_message, "details": str(e)}
         )
     
     if resp.status_code != 200:
@@ -313,7 +452,7 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
     # Process streaming response
     if 'stream' in payload and payload['stream']:
         return StreamingResponse(
-            stream_response_with_guard(resp),
+            stream_response_with_guard(resp, detected_lang),
             media_type="application/x-ndjson",
         )
     else:
@@ -322,7 +461,8 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
             data = resp.json()
         except Exception as e:
             logger.error(f"Failed to parse upstream response: {e}")
-            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response"})
+            error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
         
         # Scan output
         if config.get('enable_output_guard', True):
@@ -333,16 +473,25 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
             )
             if not output_result['allowed']:
                 logger.warning(f"Output blocked: {output_result}")
+                
+                # Get localized error message
+                error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                
                 raise HTTPException(
                     status_code=400,
-                    detail={"error": "response_blocked", "details": output_result}
+                    detail={
+                        "error": "response_blocked",
+                        "message": error_message,
+                        "language": detected_lang,
+                        "details": output_result
+                    }
                 )
             logger.info(f"Output passed guards: {output_result['scanners']}")
         
         return JSONResponse(status_code=200, content=data)
 
 
-async def stream_response_with_guard(response):
+async def stream_response_with_guard(response, detected_lang: str = 'en'):
     """Stream response with output scanning."""
     accumulated_text = ""
     
@@ -366,9 +515,15 @@ async def stream_response_with_guard(response):
                 output_result = guard_manager.scan_output(accumulated_text)
                 if not output_result['allowed']:
                     logger.warning(f"Streaming output blocked: {output_result}")
+                    
+                    # Get localized error message
+                    error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                    
                     # Send error as last chunk
                     error_chunk = {
                         "error": "response_blocked",
+                        "message": error_message,
+                        "language": detected_lang,
                         "reason": output_result.get('scanners', {})
                     }
                     yield (json.dumps(error_chunk) + '\n').encode()
@@ -385,7 +540,8 @@ async def stream_response_with_guard(response):
     
     except Exception as e:
         logger.error(f"Error during streaming: {e}")
-        yield (json.dumps({"error": str(e)}) + '\n').encode()
+        error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+        yield (json.dumps({"error": str(e), "message": error_message}) + '\n').encode()
 
 
 @app.post("/api/chat")
@@ -403,6 +559,9 @@ async def proxy_chat(request: Request):
             if isinstance(msg, dict) and 'content' in msg:
                 prompt += msg['content'] + "\n"
     
+    # Detect language from prompt
+    detected_lang = LanguageDetector.detect_language(prompt)
+    
     # Scan input
     if config.get('enable_input_guard', True) and prompt:
         input_result = guard_manager.scan_input(
@@ -410,9 +569,30 @@ async def proxy_chat(request: Request):
             block_on_error=config.get('block_on_guard_error', False)
         )
         if not input_result['allowed']:
+            logger.warning(f"Input blocked: {input_result}")
+            
+            # Get scanner reason
+            reason = ', '.join([
+                f"{scanner_name}: {info.get('reason', 'Unknown')}"
+                for scanner_name, info in input_result.get('scanners', {}).items()
+                if not info.get('passed', True)
+            ])
+            
+            # Get localized error message
+            error_message = LanguageDetector.get_error_message(
+                'prompt_blocked',
+                detected_lang,
+                reason
+            )
+            
             raise HTTPException(
                 status_code=400,
-                detail={"error": "prompt_blocked", "details": input_result}
+                detail={
+                    "error": "prompt_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": input_result
+                }
             )
     
     # Forward to Ollama chat endpoint
@@ -422,7 +602,9 @@ async def proxy_chat(request: Request):
     try:
         resp = requests.post(url, json=payload, stream=True, timeout=300)
     except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail={"error": "upstream_error"})
+        logger.error(f"Upstream error: {e}")
+        error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
+        raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
     
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail={"error": "upstream_error"})
@@ -434,7 +616,8 @@ async def proxy_chat(request: Request):
         try:
             data = resp.json()
         except:
-            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response"})
+            error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
         
         # Scan output - Ollama chat uses 'message' field
         if config.get('enable_output_guard', True):
@@ -445,9 +628,19 @@ async def proxy_chat(request: Request):
             if output_text:
                 output_result = guard_manager.scan_output(output_text)
                 if not output_result['allowed']:
+                    logger.warning(f"Output blocked: {output_result}")
+                    
+                    # Get localized error message
+                    error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                    
                     raise HTTPException(
                         status_code=400,
-                        detail={"error": "response_blocked", "details": output_result}
+                        detail={
+                            "error": "response_blocked",
+                            "message": error_message,
+                            "language": detected_lang,
+                            "details": output_result
+                        }
                     )
         
         return JSONResponse(status_code=200, content=data)
