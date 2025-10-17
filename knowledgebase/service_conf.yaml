@@ -72,21 +72,21 @@ redis:
 #   scheme: 'mysql'  # Storage type, such as s3, oss, azure, etc.
 #   config:
 #     oss_table: 'opendal_storage'
-  user_default_llm:
-   factory: 'Ollama'
-   api_key: 'sk-nondee'
-   base_url: 'http://llm-serve.ai4team.vn'
-   default_models:
-     chat_model:
-       name: 'qwen2.5-7b-instruct'
-       factory: 'Ollama'
-       api_key: 'sk-noneed'
-       base_url: 'http://llm-serve.ai4team.vn'
-     embedding_model:
-       name: 'http://llm-serve.ai4team.vn'
-       factory: 'Ollama'
-       api_key: 'sk-noneed'
-       base_url: 'http://llm-serve.ai4team.vn'
+user_default_llm:
+  factory: 'Ollama'
+  api_key: 'sk-nondee'
+  base_url: 'http://llm-serve.ai4team.vn'
+  default_models:
+    chat_model:
+      name: 'qwen2.5-7b-instruct'
+      factory: 'Ollama'
+      api_key: 'sk-noneed'
+      base_url: 'http://llm-serve.ai4team.vn'
+    embedding_model:
+      name: 'http://llm-serve.ai4team.vn'
+      factory: 'Ollama'
+      api_key: 'sk-noneed'
+      base_url: 'http://llm-serve.ai4team.vn'
 #     rerank_model: 'bge-reranker-v2'
 #     asr_model:
 #       model: 'whisper-large-v3' # alias of name
