@@ -1,0 +1,546 @@
+version: '3.8'
+
+################################################################################
+# Langfuse 3.0 Docker Compose Configuration
+# 
+# LLM Observability Platform with:
+#   - Tracing & Debugging: Track LLM calls and application logic
+#   - Prompt Management: Version control and iterate on prompts
+#   - Evaluations: LLM-as-judge, manual labeling, custom pipelines
+#   - Datasets: Test sets and benchmarks for evaluation
+#   - Playground: Interactive prompt development and testing
+#
+# Components:
+#   - web: Next.js frontend + backend (tRPC API, REST endpoints)
+#   - worker: Express.js background job processor (BullMQ)
+#   - postgres: PostgreSQL database (primary data store)
+#   - clickhouse: ClickHouse database (analytics/traces)
+#   - redis: Redis cache and job queue
+#   - minio: S3-compatible object storage (optional, for media)
+#
+# Documentation: https://langfuse.com/docs/deployment/self-host
+# GitHub: https://github.com/langfuse/langfuse
+################################################################################
+
+services:
+  
+  ################################################################################
+  # PostgreSQL - Primary Database
+  # Stores: users, organizations, projects, API keys, prompts, evaluations
+  ################################################################################
+  postgres:
+    image: postgres:16-alpine
+    container_name: langfuse-postgres
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-langfuse123}
+      # Performance tuning for small deployments
+      POSTGRES_INITDB_ARGS: >
+        -c max_connections=200
+        -c shared_buffers=256MB
+        -c effective_cache_size=1GB
+        -c maintenance_work_mem=64MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c default_statistics_target=100
+    volumes:
+      # Data persistence
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    ports:
+      # Expose for debugging (optional, comment out in production)
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - langfuse
+    restart: unless-stopped
+    # Production: change to no volume mount and use managed database
+    # Production recommendation: Use AWS RDS, Azure Database, or similar
+
+  ################################################################################
+  # ClickHouse - Analytics Database
+  # High-volume trace data storage (separate from operational database)
+  # Optimized for write-heavy, analytics-focused queries
+  ################################################################################
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: langfuse-clickhouse
+    environment:
+      CLICKHOUSE_DB: langfuse
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-langfuse123}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      # Data persistence
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+    ports:
+      # HTTP interface (debug)
+      - "${CLICKHOUSE_PORT:-8123}:8123"
+      # Native TCP protocol
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - langfuse
+    restart: unless-stopped
+    # Production: use managed ClickHouse Cloud or dedicated cluster
+
+  ################################################################################
+  # Redis - Cache & Queue System
+  # Used for: caching, BullMQ job queue, sessions
+  ################################################################################
+  redis:
+    image: redis:7-alpine
+    container_name: langfuse-redis
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-langfuse123}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfilename "appendonly.aof"
+    volumes:
+      # Data persistence for AOF
+      - langfuse_redis_data:/data
+    ports:
+      # Expose for debugging (optional, comment out in production)
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-langfuse123}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - langfuse
+    restart: unless-stopped
+    # Production: use Redis Cluster or managed Redis (AWS ElastiCache, Azure Cache)
+
+  ################################################################################
+  # MinIO - S3-Compatible Object Storage (Optional)
+  # For storing trace media, file uploads, exports
+  # Can be replaced with AWS S3, Azure Blob Storage, or Google Cloud Storage
+  ################################################################################
+  minio:
+    image: minio/minio:latest
+    container_name: langfuse-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    command: server /data --console-address ":9001"
+    volumes:
+      # Data persistence
+      - langfuse_minio_data:/data
+    ports:
+      # MinIO API
+      - "${MINIO_PORT:-9000}:9000"
+      # MinIO Console
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - langfuse
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    # Production: use AWS S3, Azure Blob Storage, or managed MinIO service
+
+  ################################################################################
+  # Langfuse Web Application
+  # Next.js application providing UI and REST/tRPC APIs
+  # Handles: user management, prompt management, evaluations, dashboards
+  ################################################################################
+  langfuse-web:
+    image: ghcr.io/langfuse/langfuse:latest
+    container_name: langfuse-web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Core Configuration
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://langfuse:${POSTGRES_PASSWORD:-langfuse123}@postgres:5432/langfuse"
+      
+      # ClickHouse Configuration
+      CLICKHOUSE_URL: "http://clickhouse:8123"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: langfuse
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-langfuse123}
+      
+      # Redis Configuration
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-langfuse123}@redis:6379"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      
+      # MinIO/S3 Configuration (for media storage)
+      # If using AWS S3, set LANGFUSE_S3_EVENT_UPLOAD_BUCKET instead
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse-media
+      LANGFUSE_S3_ENDPOINT: "http://minio:9000"
+      LANGFUSE_S3_REGION: us-east-1
+      LANGFUSE_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LANGFUSE_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      # Uncomment to use S3 instead of MinIO:
+      # LANGFUSE_S3_ENDPOINT: "https://s3.amazonaws.com"
+      # LANGFUSE_S3_REGION: ${AWS_REGION:-us-east-1}
+      # LANGFUSE_S3_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      # LANGFUSE_S3_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      
+      # Authentication
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-replaceme-secret-key-min-32-characters}
+      NEXTAUTH_URL: "http://localhost:3000"
+      # For production, use your domain:
+      # NEXTAUTH_URL: "https://langfuse.yourdomain.com"
+      
+      # Application Settings
+      NEXT_PUBLIC_SIGN_UP_DISABLED: "${NEXT_PUBLIC_SIGN_UP_DISABLED:-false}"
+      LANGFUSE_ENABLE_BLOB_STORAGE_FILE_LOG: "true"
+      
+      # Email Configuration (optional - for user invitations)
+      # SMTP_CONNECTION_URL: "smtp://user:password@smtp.gmail.com:587"
+      
+      # Observability
+      TELEMETRY_ENABLED: "${TELEMETRY_ENABLED:-true}"
+      # Opt-out of anonymous telemetry if desired:
+      # TELEMETRY_ENABLED: "false"
+      
+      # Optional: Analytics Integration
+      # NEXT_PUBLIC_POSTHOG_KEY: ${POSTHOG_KEY}
+      # NEXT_PUBLIC_POSTHOG_HOST: ${POSTHOG_HOST}
+      
+      # Optional: Error Tracking
+      # NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN}
+      # SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN}
+    ports:
+      - "${LANGFUSE_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - langfuse
+    restart: unless-stopped
+    # Production: Use managed container service (AWS ECS, Azure Container Instances, GKE)
+    # Production: Mount secrets from Docker secrets or secrets manager
+    # Production: Use read-only root filesystem where possible
+
+  ################################################################################
+  # Langfuse Worker
+  # Express.js background job processor for async tasks:
+  #   - Data ingestion and processing
+  #   - Evaluation execution
+  #   - Exports and reports
+  #   - Integrations (webhooks, external APIs)
+  ################################################################################
+  langfuse-worker:
+    image: ghcr.io/langfuse/langfuse-worker:latest
+    container_name: langfuse-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Core Configuration
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://langfuse:${POSTGRES_PASSWORD:-langfuse123}@postgres:5432/langfuse"
+      
+      # ClickHouse Configuration
+      CLICKHOUSE_URL: "http://clickhouse:8123"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_DB: langfuse
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-langfuse123}
+      
+      # Redis Configuration
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-langfuse123}@redis:6379"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      
+      # Worker Settings
+      HOSTNAME: "0.0.0.0"
+      PORT: 3030
+      
+      # MinIO/S3 Configuration
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse-media
+      LANGFUSE_S3_ENDPOINT: "http://minio:9000"
+      LANGFUSE_S3_REGION: us-east-1
+      LANGFUSE_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LANGFUSE_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      
+      # Optional: Analytics
+      TELEMETRY_ENABLED: "${TELEMETRY_ENABLED:-true}"
+    ports:
+      - "${LANGFUSE_WORKER_PORT:-3030}:3030"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3030/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - langfuse
+    restart: unless-stopped
+    # Note: Can run multiple worker instances for horizontal scaling
+    # Just update container_name and port for each instance
+    # Load balance with round-robin or sticky sessions
+
+  ################################################################################
+  # MinIO Client - Creates S3 buckets on startup (Optional)
+  # Initializes required buckets if using MinIO
+  ################################################################################
+  minio-init:
+    image: minio/mc:latest
+    container_name: langfuse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin123;
+      /usr/bin/mc mb minio/langfuse-events --ignore-existing;
+      /usr/bin/mc mb minio/langfuse-media --ignore-existing;
+      /usr/bin/mc version enable minio/langfuse-events;
+      echo 'MinIO buckets initialized';
+      "
+    networks:
+      - langfuse
+    # This runs once and exits
+    # set restart policy to "no" to avoid repeated restarts
+    restart: "no"
+
+################################################################################
+# Volumes - Data Persistence
+################################################################################
+volumes:
+  langfuse_postgres_data:
+    driver: local
+  langfuse_clickhouse_data:
+    driver: local
+  langfuse_redis_data:
+    driver: local
+  langfuse_minio_data:
+    driver: local
+
+################################################################################
+# Networks
+################################################################################
+networks:
+  langfuse:
+    driver: bridge
+
+################################################################################
+# Usage & Quick Start
+################################################################################
+# 
+# 1. Create .env file in this directory with required variables:
+#    cp .env.example .env
+#
+# 2. Start all services:
+#    docker compose -f langfuse.compose.yml up -d
+#
+# 3. Wait for initialization (~30 seconds):
+#    docker compose -f langfuse.compose.yml logs -f langfuse-web
+#
+# 4. Access Langfuse:
+#    Web UI:        http://localhost:3000
+#    MinIO Console: http://localhost:9001 (minioadmin/minioadmin123)
+#
+# 5. Initial Setup:
+#    - Create account at http://localhost:3000
+#    - Default credentials: demo@langfuse.com / password
+#    - Create a new project
+#    - Generate API keys
+#
+# 6. Stop all services:
+#    docker compose -f langfuse.compose.yml down
+#
+# 7. Destroy and clean up (WARNING - removes all data):
+#    docker compose -f langfuse.compose.yml down -v
+#
+# 8. View logs:
+#    docker compose -f langfuse.compose.yml logs -f [service_name]
+#    Services: postgres, clickhouse, redis, minio, langfuse-web, langfuse-worker
+#
+# 9. Scale worker instances (for high throughput):
+#    docker compose -f langfuse.compose.yml up -d --scale langfuse-worker=3
+#
+# Environment Variables (.env file)
+# 
+# Required:
+# --------
+# POSTGRES_PASSWORD=your-secure-password
+# CLICKHOUSE_PASSWORD=your-secure-password
+# REDIS_PASSWORD=your-secure-password
+# NEXTAUTH_SECRET=your-secret-min-32-characters
+# NEXTAUTH_URL=http://localhost:3000  (or your domain)
+#
+# Optional:
+# --------
+# POSTGRES_PORT=5432
+# CLICKHOUSE_PORT=8123
+# REDIS_PORT=6379
+# LANGFUSE_PORT=3000
+# LANGFUSE_WORKER_PORT=3030
+# MINIO_PORT=9000
+# MINIO_CONSOLE_PORT=9001
+# MINIO_ROOT_USER=minioadmin
+# MINIO_ROOT_PASSWORD=minioadmin123
+# 
+# AWS S3 (instead of MinIO):
+# LANGFUSE_S3_ENDPOINT=https://s3.amazonaws.com
+# LANGFUSE_S3_REGION=us-east-1
+# LANGFUSE_S3_ACCESS_KEY_ID=your-aws-access-key
+# LANGFUSE_S3_SECRET_ACCESS_KEY=your-aws-secret-key
+#
+# Observability:
+# TELEMETRY_ENABLED=false  (to opt-out of anonymous telemetry)
+#
+################################################################################
+# Production Deployment Considerations
+################################################################################
+#
+# 1. Database Backup Strategy
+#    - PostgreSQL: Use automated backups (AWS RDS, Azure Database)
+#    - ClickHouse: Enable replication for HA
+#    - Set up regular backup exports
+#
+# 2. Scaling
+#    - Deploy multiple langfuse-web instances behind a load balancer
+#    - Scale langfuse-worker for higher throughput (CPU-intensive)
+#    - Use managed database services for HA
+#    - Consider Redis cluster for caching
+#
+# 3. Security
+#    - Use HTTPS with valid SSL certificates
+#    - Store secrets in environment variables or secrets manager
+#    - Restrict database access to internal networks only
+#    - Enable PostgreSQL SSL connections
+#    - Use VPC for isolated networking
+#    - Implement rate limiting on API endpoints
+#
+# 4. Monitoring & Logging
+#    - Send logs to centralized log system (ELK, CloudWatch)
+#    - Monitor CPU, memory, disk usage
+#    - Set up alerts for errors and performance degradation
+#    - Use APM tools for tracing (optional with Sentry integration)
+#
+# 5. S3 Storage
+#    - Consider S3 with lifecycle policies for cost optimization
+#    - Use CloudFront CDN for media delivery
+#    - Enable versioning for data protection
+#    - Regular cleanup of old traces
+#
+# 6. Infrastructure as Code
+#    - Kubernetes (via Helm): https://langfuse.com/self-hosting/kubernetes-helm
+#    - Terraform: https://langfuse.com/self-hosting/aws
+#    - Docker Swarm: similar to compose but with scaling features
+#
+################################################################################
+# API & Integration Examples
+################################################################################
+#
+# 1. Langfuse Python SDK
+#    ```python
+#    from langfuse import Langfuse
+#    
+#    langfuse = Langfuse(
+#        public_key="pk-lf-...",
+#        secret_key="sk-lf-...",
+#        host="http://localhost:3000"  # Your Langfuse instance
+#    )
+#    ```
+#
+# 2. OpenAI Integration (Python)
+#    ```python
+#    from langfuse.openai import openai
+#    
+#    response = openai.chat.completions.create(
+#        model="gpt-4",
+#        messages=[{"role": "user", "content": "Hello"}]
+#    )
+#    ```
+#
+# 3. LangChain Integration
+#    ```python
+#    from langfuse.callback import CallbackHandler
+#    
+#    handler = CallbackHandler(
+#        public_key="pk-lf-...",
+#        secret_key="sk-lf-...",
+#        host="http://localhost:3000"
+#    )
+#    
+#    chain.invoke(..., config={"callbacks": [handler]})
+#    ```
+#
+# 4. LiteLLM Integration
+#    See: https://docs.litellm.ai/docs/proxy/guardrails/custom_guardrail
+#
+################################################################################
+# Troubleshooting
+################################################################################
+#
+# 1. Port Already in Use
+#    Change ports in docker-compose.yml or:
+#    LANGFUSE_PORT=3001 docker compose up
+#
+# 2. Database Connection Error
+#    Check DATABASE_URL format and credentials
+#    Verify PostgreSQL is healthy: docker-compose logs postgres
+#
+# 3. MinIO Bucket Creation Failed
+#    Check MinIO console: http://localhost:9001
+#    Verify credentials match environment variables
+#
+# 4. Web App Won't Start
+#    Check logs: docker-compose logs langfuse-web
+#    Verify all environment variables are set
+#    Ensure database migrations completed
+#
+# 5. High Memory Usage
+#    Reduce Redis maxmemory or use Redis Cluster
+#    Check for large trace ingestion
+#    Monitor with: docker stats
+#
+# 6. Worker Job Queue Backing Up
+#    Scale additional worker instances
+#    Check REDIS_URL connection
+#    Verify enough disk space for ClickHouse
+#
+################################################################################
+# Documentation & Support
+################################################################################
+#
+# - Official Documentation: https://langfuse.com/docs
+# - Self-Hosting Guide: https://langfuse.com/self-hosting
+# - GitHub Issues: https://github.com/langfuse/langfuse/issues
+# - Discord Community: https://discord.com/invite/7NXusRtqYU
+# - GitHub Discussions: https://github.com/orgs/langfuse/discussions
+#
+################################################################################
