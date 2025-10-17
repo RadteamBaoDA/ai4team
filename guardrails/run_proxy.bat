@@ -9,6 +9,19 @@ REM   run_proxy.bat --host 0.0.0.0 --port 8080
 REM   run_proxy.bat --reload                    # Auto-reload on code changes
 REM   run_proxy.bat --debug                     # Show debug logs
 REM
+REM Nginx-Only Access (restrict to Nginx proxy):
+REM   set NGINX_WHITELIST=127.0.0.1              # Single Nginx IP
+REM   set NGINX_WHITELIST=192.168.1.10,192.168.1.11  # Multiple IPs
+REM   set NGINX_WHITELIST=192.168.1.0/24         # CIDR range
+REM   run_proxy.bat                              # Start with whitelist
+REM
+REM Python Virtual Environment:
+REM   python -m venv venv                        # Create venv
+REM   pip install -r requirements.txt            # Install dependencies
+REM   set VENV_DIR=venv                          # Custom venv location
+REM   set USE_VENV=true                          # Enable venv (default)
+REM   run_proxy.bat                              # Start with venv
+REM
 REM Features:
 REM   - Uvicorn ASGI server
 REM   - Multi-worker support for parallel requests
@@ -16,6 +29,8 @@ REM   - Configurable concurrency per worker
 REM   - Environment variable support
 REM   - Health check endpoint
 REM   - Request logging
+REM   - Python virtual environment support
+REM   - Nginx-only access control
 
 setlocal enabledelayedexpansion
 
@@ -28,6 +43,11 @@ set "LOG_LEVEL=info"
 set "RELOAD=false"
 set "CONFIG_FILE=config.yaml"
 set "PROXY_MODULE=ollama_guard_proxy:app"
+
+REM Virtual environment setup
+if not defined VENV_DIR set "VENV_DIR=venv"
+if not defined USE_VENV set "USE_VENV=true"
+set "VENV_ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 
 REM Parse arguments
 :parse_args
@@ -96,6 +116,19 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM Check and activate virtual environment
+if "%USE_VENV%"=="true" (
+  if exist "%VENV_ACTIVATE%" (
+    echo Activating Python virtual environment: %VENV_DIR%
+    call "%VENV_ACTIVATE%"
+  ) else (
+    echo Warning: Virtual environment not found at %VENV_DIR%
+    echo Tip: Create venv with: python -m venv %VENV_DIR%
+    echo Tip: Or set VENV_DIR to another location
+    echo Continuing with system Python...
+  )
+)
+
 REM Check if uvicorn is installed
 python -c "import uvicorn" >nul 2>&1
 if errorlevel 1 (
@@ -110,6 +143,12 @@ if not exist "%CONFIG_FILE%" (
 
 REM Set environment variables
 if not defined OLLAMA_URL set "OLLAMA_URL=http://127.0.0.1:11434"
+if not defined NGINX_WHITELIST set "NGINX_WHITELIST="
+if not defined ENABLE_INPUT_GUARD set "ENABLE_INPUT_GUARD="
+if not defined ENABLE_OUTPUT_GUARD set "ENABLE_OUTPUT_GUARD="
+if not defined ENABLE_IP_FILTER set "ENABLE_IP_FILTER="
+if not defined IP_WHITELIST set "IP_WHITELIST="
+if not defined IP_BLACKLIST set "IP_BLACKLIST="
 set "PROXY_PORT=%PORT%"
 set "CONFIG_FILE=%CONFIG_FILE%"
 
@@ -131,13 +170,58 @@ echo.
 echo ════════════════════════════════════════════════════════════════
 echo          Ollama Guard Proxy - Uvicorn Server
 echo ════════════════════════════════════════════════════════════════
-echo Server:        %HOST%:%PORT%
-echo Workers:       %WORKERS% (for parallel request handling)
-echo Concurrency:   %CONCURRENCY% per worker
-echo Log Level:     %LOG_LEVEL%
-echo Reload:        %RELOAD%
-echo Config:        %CONFIG_FILE%
-echo Ollama URL:    %OLLAMA_URL%
+echo Server Configuration:
+echo   Host:       %HOST%
+echo   Port:       %PORT%
+echo   Workers:    %WORKERS%
+echo Python Environment:
+if "%USE_VENV%"=="true" (
+  if exist "%VENV_ACTIVATE%" (
+    echo   Venv:       %VENV_DIR% (ACTIVE)
+  ) else (
+    echo   Venv:       %VENV_DIR% (NOT FOUND - using system Python)
+  )
+) else (
+  echo   Venv:       DISABLED (using system Python)
+)
+echo Runtime Settings:
+echo   Concurrency:     %CONCURRENCY% per worker
+echo   Log Level:       %LOG_LEVEL%
+echo   Reload:          %RELOAD%
+echo   Config File:     %CONFIG_FILE%
+echo ════════════════════════════════════════════════════════════════
+echo Environment Variables:
+echo   OLLAMA_URL:              %OLLAMA_URL%
+if "%NGINX_WHITELIST%"=="" (
+  echo   NGINX_WHITELIST:         empty (unrestricted^)
+) else (
+  echo   NGINX_WHITELIST:         %NGINX_WHITELIST%
+)
+if "%ENABLE_INPUT_GUARD%"=="" (
+  echo   ENABLE_INPUT_GUARD:      not set
+) else (
+  echo   ENABLE_INPUT_GUARD:      %ENABLE_INPUT_GUARD%
+)
+if "%ENABLE_OUTPUT_GUARD%"=="" (
+  echo   ENABLE_OUTPUT_GUARD:     not set
+) else (
+  echo   ENABLE_OUTPUT_GUARD:     %ENABLE_OUTPUT_GUARD%
+)
+if "%ENABLE_IP_FILTER%"=="" (
+  echo   ENABLE_IP_FILTER:        not set
+) else (
+  echo   ENABLE_IP_FILTER:        %ENABLE_IP_FILTER%
+)
+if "%IP_WHITELIST%"=="" (
+  echo   IP_WHITELIST:            not set
+) else (
+  echo   IP_WHITELIST:            %IP_WHITELIST%
+)
+if "%IP_BLACKLIST%"=="" (
+  echo   IP_BLACKLIST:            not set
+) else (
+  echo   IP_BLACKLIST:            %IP_BLACKLIST%
+)
 echo ════════════════════════════════════════════════════════════════
 echo Testing proxy:
 echo   curl http://%HOST%:%PORT%/health
@@ -179,15 +263,23 @@ echo.
 echo   REM Listen on specific interface
 echo   run_proxy.bat --host 127.0.0.1 --port 8080
 echo.
+echo Setup Python Virtual Environment:
+echo   python -m venv venv
+echo   call venv\Scripts\activate.bat
+echo   pip install -r requirements.txt
+echo   run_proxy.bat
+echo.
 echo Environment Variables:
 echo   OLLAMA_URL               Ollama backend URL
-echo   PROXY_PORT               Proxy port
+echo   NGINX_WHITELIST          Comma-separated IPs/CIDR for Nginx access
 echo   ENABLE_INPUT_GUARD       true/false
 echo   ENABLE_OUTPUT_GUARD      true/false
 echo   ENABLE_IP_FILTER         true/false
 echo   IP_WHITELIST             Comma-separated IPs
 echo   IP_BLACKLIST             Comma-separated IPs
 echo   CONFIG_FILE              Configuration file path
+echo   VENV_DIR                 Python virtual environment directory (default: venv)
+echo   USE_VENV                 true/false - Enable/disable venv activation (default: true)
 echo.
 goto end
 
