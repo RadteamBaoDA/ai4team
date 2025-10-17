@@ -9,6 +9,7 @@ Features:
 - Streaming response support
 - Comprehensive logging and metrics
 - Configuration via YAML or environment variables
+- IP whitelist support (restrict access to nginx only)
 
 Usage:
     pip install fastapi uvicorn requests pydantic pyyaml llm-guard
@@ -16,12 +17,23 @@ Usage:
 
 Or with Uvicorn directly:
     uvicorn ollama_guard_proxy:app --host 0.0.0.0 --port 8080
+
+IP Whitelist (Nginx Only):
+    # Via environment variable (comma-separated)
+    export NGINX_WHITELIST="127.0.0.1,192.168.1.10,10.0.0.5"
+    
+    # Via YAML configuration file
+    # nginx_whitelist:
+    #   - "127.0.0.1"
+    #   - "192.168.1.10"
+    #   - "10.0.0.5"
 """
 
 import os
 import json
 import logging
 import re
+import ipaddress
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import yaml
@@ -58,6 +70,77 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class IPWhitelist:
+    """Manage IP whitelist for restricting access (e.g., nginx only)."""
+    
+    def __init__(self, whitelist: Optional[List[str]] = None):
+        """
+        Initialize IP whitelist.
+        
+        Args:
+            whitelist: List of allowed IP addresses or CIDR ranges
+                      Examples: ["127.0.0.1", "192.168.1.0/24", "10.0.0.5"]
+        """
+        self.enabled = False
+        self.whitelist: List[ipaddress.IPv4Network | ipaddress.IPv4Address] = []
+        
+        if whitelist:
+            self.enabled = len(whitelist) > 0
+            for ip_str in whitelist:
+                try:
+                    # Try to parse as CIDR network first
+                    if '/' in ip_str:
+                        self.whitelist.append(ipaddress.IPv4Network(ip_str))
+                        logger.info(f"Added CIDR network to whitelist: {ip_str}")
+                    else:
+                        # Parse as individual IP
+                        self.whitelist.append(ipaddress.IPv4Address(ip_str))
+                        logger.info(f"Added IP to whitelist: {ip_str}")
+                except ValueError as e:
+                    logger.warning(f"Invalid IP/CIDR '{ip_str}': {e}")
+    
+    def is_allowed(self, client_ip: str) -> bool:
+        """
+        Check if client IP is in whitelist.
+        
+        Args:
+            client_ip: Client IP address to check
+            
+        Returns:
+            True if IP is whitelisted or whitelist is disabled, False otherwise
+        """
+        if not self.enabled:
+            return True
+        
+        try:
+            ip = ipaddress.IPv4Address(client_ip)
+            
+            # Check against each whitelisted entry
+            for allowed in self.whitelist:
+                if isinstance(allowed, ipaddress.IPv4Network):
+                    # Check if IP is in network
+                    if ip in allowed:
+                        return True
+                else:
+                    # Check if IP matches exactly
+                    if ip == allowed:
+                        return True
+            
+            return False
+        
+        except ValueError:
+            logger.warning(f"Invalid client IP format: {client_ip}")
+            return False
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get whitelist statistics."""
+        return {
+            "enabled": self.enabled,
+            "count": len(self.whitelist),
+            "whitelist": [str(ip) for ip in self.whitelist]
+        }
 
 
 class LanguageDetector:
@@ -221,6 +304,14 @@ class Config:
             self.config.get('block_on_guard_error', False)
         )
         
+        # IP Whitelist Configuration (Nginx only)
+        nginx_whitelist_env = os.environ.get('NGINX_WHITELIST', '')
+        if nginx_whitelist_env:
+            # Parse comma-separated IPs from environment variable
+            self.config['nginx_whitelist'] = [ip.strip() for ip in nginx_whitelist_env.split(',') if ip.strip()]
+        elif 'nginx_whitelist' not in self.config:
+            self.config['nginx_whitelist'] = []
+        
         logger.info(f"Configuration loaded: {self.config}")
     
     def get(self, key: str, default: Any = None) -> Any:
@@ -335,10 +426,27 @@ guard_manager = LLMGuardManager(
     enable_output=config.get('enable_output_guard', True),
 )
 
+# Initialize IP whitelist (nginx only)
+ip_whitelist = IPWhitelist(config.get('nginx_whitelist', []))
+
 app = FastAPI(
     title="Ollama Proxy with LLM Guard",
     description="Secure proxy for Ollama with LLM Guard integration",
 )
+
+
+def extract_client_ip(request: Request) -> str:
+    """Extract client IP from request, accounting for proxies."""
+    # Check X-Forwarded-For header (set by nginx)
+    if 'x-forwarded-for' in request.headers:
+        return request.headers['x-forwarded-for'].split(',')[0].strip()
+    
+    # Check X-Real-IP header (alternative nginx header)
+    if 'x-real-ip' in request.headers:
+        return request.headers['x-real-ip'].strip()
+    
+    # Fallback to direct connection
+    return request.client.host if request.client else '0.0.0.0'
 
 
 def extract_text_from_payload(payload: Dict[str, Any]) -> str:
@@ -368,9 +476,32 @@ def extract_text_from_response(data: Any) -> str:
 
 
 @app.middleware("http")
+async def check_ip_whitelist(request: Request, call_next):
+    """Middleware to check IP whitelist (nginx only)."""
+    client_ip = extract_client_ip(request)
+    
+    # Check if client IP is whitelisted
+    if not ip_whitelist.is_allowed(client_ip):
+        logger.warning(f"Rejected request from non-whitelisted IP: {client_ip} {request.method} {request.url.path}")
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "access_denied",
+                "message": "Access denied. Only requests from whitelisted IPs are allowed.",
+                "client_ip": client_ip
+            }
+        )
+    
+    logger.debug(f"IP whitelist check passed for {client_ip}")
+    response = await call_next(request)
+    return response
+
+
+@app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Middleware to log all requests."""
-    logger.info(f"Request: {request.method} {request.url.path}")
+    client_ip = extract_client_ip(request)
+    logger.info(f"Request from {client_ip}: {request.method} {request.url.path}")
     response = await call_next(request)
     logger.info(f"Response status: {response.status_code}")
     return response
@@ -888,7 +1019,8 @@ async def health_check():
         "guards": {
             "input_guard": "enabled" if guard_manager.enable_input else "disabled",
             "output_guard": "enabled" if guard_manager.enable_output else "disabled",
-        }
+        },
+        "whitelist": ip_whitelist.get_stats()
     }
 
 
@@ -896,6 +1028,8 @@ async def health_check():
 async def get_config():
     """Get current configuration (non-sensitive)."""
     safe_config = {k: v for k, v in config.config.items() if k not in ['secret_key']}
+    # Don't expose actual whitelist IPs in config, only show if enabled
+    safe_config['nginx_whitelist'] = ip_whitelist.get_stats()
     return safe_config
 
 
