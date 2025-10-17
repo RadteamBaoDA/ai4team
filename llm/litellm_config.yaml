@@ -1,0 +1,317 @@
+# LiteLLM Proxy Configuration with Load Balancing for Multiple Ollama Servers
+# with Custom LLM Guard Guardrails
+# See: https://docs.litellm.ai/docs/proxy/guardrails/custom_guardrail
+
+# ===== GUARDRAILS CONFIGURATION =====
+# Define custom guardrails for security scanning
+guardrails:
+  # Pre-call input scanning and sanitization
+  - guardrail_name: "llm-guard-input"
+    litellm_params:
+      guardrail: "litellm_guard_hooks.LLMGuardCustomGuardrail"
+      mode: "pre_call"  # Runs async_pre_call_hook before LLM API call
+    description: "LLM Guard input validation and modification"
+
+  # During-call moderation (parallel validation)
+  - guardrail_name: "llm-guard-moderation"
+    litellm_params:
+      guardrail: "litellm_guard_hooks.LLMGuardCustomGuardrail"
+      mode: "during_call"  # Runs async_moderation_hook in parallel
+    description: "LLM Guard parallel moderation"
+
+  # Post-call output validation
+  - guardrail_name: "llm-guard-output"
+    litellm_params:
+      guardrail: "litellm_guard_hooks.LLMGuardCustomGuardrail"
+      mode: "post_call"  # Runs async_post_call_success_hook after LLM call
+    description: "LLM Guard output validation"
+
+# ===== MODEL LIST =====
+  # Primary Ollama Server (Server 1)
+  - model_name: ollama/llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: http://192.168.1.2:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+      stream: true
+    guardrails:  # Apply guardrails to this model
+      - "llm-guard-input"       # Pre-call validation
+      - "llm-guard-output"      # Post-call validation
+  
+  - model_name: ollama/mistral
+    litellm_params:
+      model: ollama/mistral
+      api_base: http://192.168.1.2:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+  
+  - model_name: ollama/neural-chat
+    litellm_params:
+      model: ollama/neural-chat
+      api_base: http://192.168.1.2:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+
+  # Secondary Ollama Server (Server 2) - Load balancing
+  - model_name: ollama/llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: http://192.168.1.11:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+      stream: true
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+  
+  - model_name: ollama/mistral
+    litellm_params:
+      model: ollama/mistral
+      api_base: http://192.168.1.11:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+  
+  - model_name: ollama/neural-chat
+    litellm_params:
+      model: ollama/neural-chat
+      api_base: http://192.168.1.11:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+
+  # Tertiary Ollama Server (Server 3) - Additional capacity
+  - model_name: ollama/llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: http://192.168.1.20:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+      stream: true
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+  
+  - model_name: ollama/mistral
+    litellm_params:
+      model: ollama/mistral
+      api_base: http://192.168.1.20:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+  
+  - model_name: ollama/neural-chat
+    litellm_params:
+      model: ollama/neural-chat
+      api_base: http://192.168.1.20:11434
+      api_version: "v1"
+      timeout: 300
+      max_retries: 2
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+
+# Load balancing configuration
+load_balancing_config:
+  # Strategy: can be "round_robin", "least_busy", "weighted"
+  strategy: "least_busy"  # Uses server usage metrics
+  
+  # Fallback routing
+  enable_fallback: true
+  fallback_strategy: "round_robin"
+  
+  # Health check settings
+  health_check_enabled: true
+  health_check_interval: 30  # seconds
+  health_check_timeout: 5    # seconds
+
+# Router settings
+router_settings:
+  # Enable cost tracking
+  track_cost: false
+  
+  # Timeout for requests (seconds)
+  request_timeout: 300
+  
+  # Max concurrent requests
+  max_concurrent_requests: 1000
+  
+  # Context window sizes for models
+  context_windows:
+    ollama/llama3.2: 8192
+    ollama/mistral: 32000
+    ollama/neural-chat: 4096
+
+# Proxy server settings
+proxy_server:
+  # Server configuration
+  host: "0.0.0.0"
+  port: 8000
+  num_workers: 4
+  
+  # Security settings
+  enable_auth: false  # Set to true and configure API keys below if needed
+  api_key_prefix: "sk-"
+  
+  # Database for caching and logging
+  database_url: "sqlite:///./litellm_proxy.db"
+  
+  # Logging
+  log_level: "INFO"
+  log_filepath: "./logs/litellm_proxy.log"
+
+# LLM Guard security settings (integrated via call hooks)
+llm_guard:
+  enabled: true
+  
+  # Input scanning
+  input_scanning:
+    enabled: true
+    scanners:
+      - BanSubstrings
+      - PromptInjection
+      - Toxicity
+      - Secrets
+      - TokenLimit
+  
+  # Output scanning
+  output_scanning:
+    enabled: true
+    scanners:
+      - BanSubstrings
+      - Toxicity
+      - MaliciousURLs
+      - NoRefusal
+      - NoCode
+  
+  # Language detection for multilingual error messages
+  multilingual_errors: true
+  supported_languages:
+    - "zh"  # Chinese
+    - "vi"  # Vietnamese
+    - "ja"  # Japanese
+    - "ko"  # Korean
+    - "ru"  # Russian
+    - "ar"  # Arabic
+    - "en"  # English (default)
+
+# Cache configuration
+cache:
+  type: "redis"  # or "memory" for testing
+  redis_host: "localhost"
+  redis_port: 6379
+  redis_db: 0
+  ttl: 3600  # Time to live in seconds
+
+# Rate limiting
+rate_limit:
+  enabled: true
+  requests_per_minute: 60
+  requests_per_hour: 1000
+  
+  # Per-model limits
+  model_limits:
+    "ollama/llama3.2": 30  # requests per minute
+    "ollama/mistral": 40
+    "ollama/neural-chat": 50
+
+# Monitoring and alerting
+monitoring:
+  # Prometheus metrics
+  enable_prometheus: true
+  prometheus_port: 8001
+  
+  # Error alerting
+  error_threshold: 10  # % of failed requests
+  alert_on_threshold: true
+  
+  # Request tracking
+  track_request_latency: true
+  track_token_usage: true
+
+# Fallback models configuration
+fallback_models:
+  # If a model fails, try these alternatives
+  ollama/llama3.2:
+    - model_name: ollama/mistral
+      provider: ollama
+  
+  ollama/mistral:
+    - model_name: ollama/neural-chat
+      provider: ollama
+
+# Server health check configuration
+health_check:
+  # Endpoint to check health
+  endpoint: "/api/tags"
+  
+  # Expected response pattern
+  expected_response_field: "models"
+  
+  # Unhealthy threshold (consecutive failures)
+  unhealthy_threshold: 3
+  
+  # Recovery check (consecutive successes to mark healthy)
+  healthy_threshold: 2
+
+# Cost tracking configuration
+cost_tracking:
+  # Track usage and costs
+  enabled: true
+  
+  # Cost per token (Ollama is typically free, but can set for accounting)
+  cost_per_1k_input_tokens: 0.0
+  cost_per_1k_output_tokens: 0.0
+
+# Advanced features
+advanced:
+  # Temperature fallback
+  default_temperature: 0.7
+  
+  # Top-p (nucleus sampling)
+  default_top_p: 1.0
+  
+  # Number of parallel completions
+  default_n: 1
+  
+  # Retry logic
+  retry_on_timeout: true
+  max_retries: 2
+  retry_delay: 1  # seconds
+  
+  # Request/response logging
+  log_requests: true
+  log_responses: true
+  mask_sensitive_data: true
+
+# OpenAI compatibility
+openai_compatibility:
+  # Enable OpenAI API compatibility
+  enabled: true
+  
+  # Endpoint prefix (for OpenAI compatible clients)
+  endpoint_prefix: "/v1"
+  
+  # Support both /v1/chat/completions and /api/chat
+  support_legacy_endpoints: true

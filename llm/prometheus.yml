@@ -1,0 +1,62 @@
+# Prometheus Configuration for LiteLLM Monitoring
+# Scrapes metrics from LiteLLM proxy and visualizes in Grafana
+
+global:
+  # Scrape interval - how often to scrape targets
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  
+  # Attach labels to time series collected from all targets
+  external_labels:
+    monitor: 'litellm-monitor'
+    environment: 'production'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alert_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # LiteLLM Proxy metrics
+  - job_name: 'litellm'
+    static_configs:
+      - targets: ['litellm-proxy:8001']
+    scrape_interval: 5s
+    scrape_timeout: 5s
+    metrics_path: '/metrics'
+    
+    # Relabel configurations
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # Nginx metrics (if using nginx-prometheus-exporter)
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:9113']
+    scrape_interval: 10s
+
+  # Redis metrics (if using redis_exporter)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 10s
+
+# Remote storage (optional - for long-term storage)
+# remote_write:
+#   - url: "http://remote-storage:9009/write"
+
+# Remote read (optional)
+# remote_read:
+#   - url: "http://remote-storage:9009/read"

@@ -1,0 +1,39 @@
+# LiteLLM Proxy with LLM Guard Integration - Requirements
+
+# Core LiteLLM
+litellm==1.41.0
+
+# Web framework and server
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+
+# Security scanning
+llm-guard==0.3.18
+
+# Configuration and utilities
+pyyaml==6.0.1
+python-dotenv==1.0.0
+
+# HTTP and networking
+requests==2.31.0
+httpx==0.25.0
+
+# Database and caching
+redis==5.0.0
+sqlalchemy==2.0.23
+
+# Monitoring and logging
+prometheus-client==0.19.0
+python-json-logger==2.0.7
+
+# Async support
+aiohttp==3.9.1
+asyncio-contextmanager==1.0.0
+
+# Data validation
+jsonschema==4.20.0
+
+# Utilities
+click==8.1.7
+tqdm==4.66.1
