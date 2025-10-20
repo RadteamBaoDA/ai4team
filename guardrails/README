@@ -25,6 +25,27 @@ injection attacks, LLM-Guard ensures that your interactions with LLMs remain saf
 
 Begin your journey with LLM Guard by downloading the package:
 
+
+Running the proxy with a Python virtual environment (venv)
+-------------------------------------------------------
+
+If you create a Python virtual environment and install the project requirements there, make sure the proxy uses that environment so installed packages (for example `llm-guard`) are available at runtime.
+
+Windows (PowerShell)
+
+```powershell
+# Create and activate venv
+python -m venv .\venv
+.\venv\Scripts\Activate.ps1
+# Install requirements
+pip install -r requirements.txt
+# Start the proxy via the provided runner (it will prefer the venv python if present)
+.\run_proxy.bat run
+```
+
+Windows (cmd)
+
+```cmd
 ```sh
 pip install llm-guard
 ```
@@ -33,11 +54,20 @@ pip install llm-guard
 
 **Important Notes**:
 
+
+Linux / macOS (bash)
+
+```bash
 - LLM Guard is designed for easy integration and deployment in production environments. While it's ready to use
   out-of-the-box, please be informed that we're constantly improving and updating the repository.
 - Base functionality requires a limited number of libraries. As you explore more advanced features, necessary libraries
   will be automatically installed.
 - Ensure you're using Python version 3.9 or higher. Confirm with: `python --version`.
+
+Notes:
+- The Windows `run_proxy.bat` and Linux `run_proxy.sh` scripts prefer the venv Python executable when it exists, and will run `uvicorn` via `python -m uvicorn` so the venv's site-packages are used.
+- If the proxy logs a warning that `llm-guard` is not installed, double-check that you installed the package into the same venv the runner is using (see output of `python -c "import sys; print(sys.executable)"`).
+
 - Library installation issues? Consider upgrading pip: `python -m pip install --upgrade pip`.
 
 **Examples**:
