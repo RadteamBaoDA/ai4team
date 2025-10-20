@@ -1,0 +1,86 @@
+# Python
+*.py[cod]
+*$py.class
+__pycache__/
+.pytest_cache/
+.pyre/
+.mypy_cache/
+.pytype/
+python_env/
+instance/
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+venv.bak/
+venv_tmp/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+.cache
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# PyCharm / IntelliJ
+.idea/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# env files and secrets
+.env
+.env.*.local
+secrets.json
+
+# Logs and database
+*.log
+*.sqlite3
+
+# Sphinx documentation
+docs/_build/
+
+# Editor temporary files
+*~
+*.swp
+*.swo
+
+# C extensions
+*.so
+
+# Byte-compiled / caching
+*.pyc
+
+# Local virtualenv created by python -m venv
+.Python

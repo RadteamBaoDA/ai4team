@@ -24,7 +24,7 @@
 #   ./run_proxy.sh start                                   # Start with whitelist
 #
 # Python Virtual Environment:
-#   python -m venv venv                                    # Create venv
+#   python3 -m venv venv                                    # Create venv
 #   pip install -r requirements.txt                        # Install dependencies
 #   export VENV_DIR="./venv"                               # Custom venv location
 #   export USE_VENV="true"                                 # Enable venv (default)
@@ -50,29 +50,20 @@ LOG_FILE="$LOG_DIR/proxy.log"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
 # Virtual environment setup
-VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/venv}"
+VENV_DIR="${VENV_DIR:-./venv}"
 VENV_ACTIVATE="$VENV_DIR/bin/activate"
 USE_VENV="${USE_VENV:-true}"
 
 # Default configuration
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8080}"
+PORT="${PORT:-9999}"
 WORKERS="${WORKERS:-4}"                    # Number of worker processes
-WORKERS="${1:-$WORKERS}"
 CONCURRENCY="${CONCURRENCY:-128}"          # Concurrent connections per worker
 LOG_LEVEL="${LOG_LEVEL:-info}"             # info, debug, warning, error
 RELOAD="${RELOAD:-false}"
 CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
 PROXY_MODULE="ollama_guard_proxy:app"
 
-# Default configuration
-HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8080}"
-WORKERS="${WORKERS:-4}"                    # Number of worker processes
-CONCURRENCY="${CONCURRENCY:-128}"          # Concurrent connections per worker
-LOG_LEVEL="${LOG_LEVEL:-info}"             # info, debug, warning, error
-RELOAD="${RELOAD:-false}"
-CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
 PROXY_MODULE="ollama_guard_proxy:app"
 
 # Command to execute (start, stop, restart, status, logs, run)
@@ -341,7 +332,7 @@ EOF
 run_interactive() {
 
   # Check if Python is available
-  if ! command -v python &> /dev/null; then
+  if ! command -v python3.12 &> /dev/null; then
     echo "✗ Error: Python not found. Please install Python 3.9+"
     exit 1
   fi
@@ -371,12 +362,12 @@ run_interactive() {
   fi
 
   # Export environment variables
-  export OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
+  export OLLAMA_URL="http://192.168.1.2:11434"
   export PROXY_PORT="$PORT"
   export CONFIG_FILE="$CONFIG_FILE"
   export NGINX_WHITELIST="${NGINX_WHITELIST:-}"
-  export ENABLE_INPUT_GUARD="${ENABLE_INPUT_GUARD:-}"
-  export ENABLE_OUTPUT_GUARD="${ENABLE_OUTPUT_GUARD:-}"
+  export ENABLE_INPUT_GUARD="${ENABLE_INPUT_GUARD:-true}"
+  export ENABLE_OUTPUT_GUARD="${ENABLE_OUTPUT_GUARD:-true}"
   export ENABLE_IP_FILTER="${ENABLE_IP_FILTER:-}"
   export IP_WHITELIST="${IP_WHITELIST:-}"
   export IP_BLACKLIST="${IP_BLACKLIST:-}"
@@ -385,7 +376,7 @@ run_interactive() {
   UVICORN_CMD="uvicorn $PROXY_MODULE"
   UVICORN_CMD="$UVICORN_CMD --host $HOST"
   UVICORN_CMD="$UVICORN_CMD --port $PORT"
-  UVICORN_CMD="$UVICORN_CMD --workers $WORKERS"
+  UVICORN_CMD="$UVICORN_CMD --workers $WORKERS" 
   UVICORN_CMD="$UVICORN_CMD --log-level $LOG_LEVEL"
 
   # Add reload flag for development
