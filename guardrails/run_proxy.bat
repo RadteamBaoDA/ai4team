@@ -49,6 +49,14 @@ if not defined VENV_DIR set "VENV_DIR=venv"
 if not defined USE_VENV set "USE_VENV=true"
 set "VENV_ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 
+REM Default Python command (may be overridden to venv python)
+set "PYTHON_CMD=python"
+if "%USE_VENV%"=="true" (
+  if exist "%VENV_DIR%\Scripts\python.exe" (
+    set "PYTHON_CMD=%VENV_DIR%\Scripts\python.exe"
+  )
+)
+
 REM Parse arguments
 :parse_args
 if "%~1"=="" goto done_parsing
@@ -109,14 +117,14 @@ goto parse_args
 
 :done_parsing
 
-REM Check if Python is available
-python --version >nul 2>&1
+REM Check if Python is available (use venv python if present)
+%PYTHON_CMD% --version >nul 2>&1
 if errorlevel 1 (
-  echo Error: Python not found. Please install Python 3.9+
+  echo Error: Python not found. Please install Python 3.9+ or create the virtual environment
   exit /b 1
 )
 
-REM Check and activate virtual environment
+REM (Optional) Activate virtual environment for interactive sessions; we still prefer running the venv python directly
 if "%USE_VENV%"=="true" (
   if exist "%VENV_ACTIVATE%" (
     echo Activating Python virtual environment: %VENV_DIR%
@@ -125,14 +133,14 @@ if "%USE_VENV%"=="true" (
     echo Warning: Virtual environment not found at %VENV_DIR%
     echo Tip: Create venv with: python -m venv %VENV_DIR%
     echo Tip: Or set VENV_DIR to another location
-    echo Continuing with system Python...
+    echo Continuing (will attempt to use %PYTHON_CMD%)...
   )
 )
 
-REM Check if uvicorn is installed
-python -c "import uvicorn" >nul 2>&1
+REM Check if uvicorn is installed using the selected Python interpreter
+%PYTHON_CMD% -c "import uvicorn" >nul 2>&1
 if errorlevel 1 (
-  echo Error: uvicorn not installed. Install with: pip install uvicorn
+  echo Error: uvicorn not installed in %PYTHON_CMD%. Install with: %PYTHON_CMD% -m pip install uvicorn
   exit /b 1
 )
 
@@ -152,8 +160,8 @@ if not defined IP_BLACKLIST set "IP_BLACKLIST="
 set "PROXY_PORT=%PORT%"
 set "CONFIG_FILE=%CONFIG_FILE%"
 
-REM Build uvicorn command
-set "UVICORN_CMD=uvicorn %PROXY_MODULE%"
+REM Build uvicorn command to run via the selected Python interpreter (ensures venv packages are used)
+set "UVICORN_CMD=%PYTHON_CMD% -m uvicorn %PROXY_MODULE%"
 set "UVICORN_CMD=!UVICORN_CMD! --host %HOST%"
 set "UVICORN_CMD=!UVICORN_CMD! --port %PORT%"
 set "UVICORN_CMD=!UVICORN_CMD! --workers %WORKERS%"

@@ -2,12 +2,12 @@
 # YAML configuration file for the Ollama Guard Proxy
 
 # Ollama Backend Configuration
-ollama_url: http://127.0.0.1:11434
+ollama_url: http://192.168.1.2:11434
 ollama_path: /api/generate
 
 # Proxy Server Configuration
 proxy_host: 0.0.0.0
-proxy_port: 8080
+proxy_port: 8888
 
 # IP Access Control
 # Set enable_ip_filter to true to enforce IP-based access control
@@ -27,7 +27,7 @@ enable_output_guard: true
 
 # If true, any error during guard scanning will block the request
 # If false, errors are logged but requests are allowed
-block_on_guard_error: false
+block_on_guard_error: true
 
 # Input Scanner Configuration
 input_scanners:
