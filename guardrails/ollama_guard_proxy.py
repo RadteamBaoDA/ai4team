@@ -43,10 +43,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 import requests
 
-from guardrails.config import Config
-from guardrails.ip_whitelist import IPWhitelist
-from guardrails.language import LanguageDetector
-from guardrails.guard_manager import LLMGuardManager, HAS_LLM_GUARD
+from config import Config
+from ip_whitelist import IPWhitelist
+from language import LanguageDetector
+from guard_manager import LLMGuardManager
 
 # Configure logging
 logging.basicConfig(

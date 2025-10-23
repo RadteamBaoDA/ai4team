@@ -86,20 +86,156 @@ start_proxy() {
   # Create log directory if it doesn't exist
   mkdir -p "$LOG_DIR"
   
-  # Check if virtual environment exists
-  if [ "$USE_VENV" = "true" ] && [ -f "$VENV_ACTIVATE" ]; then
-    echo "✓ Using Python virtual environment: $VENV_DIR"
-    VENV_CMD="source $VENV_ACTIVATE && "
+  # Debug: Show environment setup
+  {
+    echo "═══════════════════════════════════════════════════════════════"
+    echo "STARTUP DEBUG INFO - $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "Script Configuration:"
+    echo "  Script Dir:      $SCRIPT_DIR"
+    echo "  Log Dir:         $LOG_DIR"
+    echo "  PID File:        $PID_FILE"
+    echo "  Log File:        $LOG_FILE"
+    echo ""
+    echo "Virtual Environment Settings:"
+    echo "  USE_VENV:        $USE_VENV"
+    echo "  VENV_DIR:        $VENV_DIR"
+    echo "  VENV_ACTIVATE:   $VENV_ACTIVATE"
+    echo ""
+    echo "Checking Virtual Environment..."
+    
+    # Check VENV_DIR existence
+    if [ -d "$VENV_DIR" ]; then
+      echo "  ✓ VENV_DIR exists: $VENV_DIR"
+      echo "    Contents:"
+      ls -la "$VENV_DIR" 2>/dev/null | head -10
+    else
+      echo "  ✗ VENV_DIR does NOT exist: $VENV_DIR"
+    fi
+    
+    # Check activate script
+    if [ -f "$VENV_ACTIVATE" ]; then
+      echo "  ✓ Activate script found: $VENV_ACTIVATE"
+    else
+      echo "  ✗ Activate script NOT found: $VENV_ACTIVATE"
+      echo "    Expected: $VENV_ACTIVATE"
+    fi
+    
+    # Check for python in venv
+    if [ -f "$VENV_DIR/bin/python" ]; then
+      echo "  ✓ Python executable found in venv"
+      "$VENV_DIR/bin/python" --version 2>&1 | sed 's/^/    /'
+    else
+      echo "  ✗ Python executable NOT found in $VENV_DIR/bin/python"
+    fi
+    
+    # Check for pip in venv
+    if [ -f "$VENV_DIR/bin/pip" ]; then
+      echo "  ✓ Pip executable found in venv"
+    else
+      echo "  ✗ Pip executable NOT found in $VENV_DIR/bin/pip"
+    fi
+    
+    # Check for uvicorn in venv
+    if [ -f "$VENV_DIR/bin/uvicorn" ]; then
+      echo "  ✓ Uvicorn executable found in venv"
+    else
+      echo "  ✗ Uvicorn executable NOT found in $VENV_DIR/bin/uvicorn"
+      echo "    Install with: $VENV_DIR/bin/pip install -r requirements.txt"
+    fi
+    
+    echo ""
+    echo "Proxy Configuration:"
+    echo "  HOST:            $HOST"
+    echo "  PORT:            $PORT"
+    echo "  WORKERS:         $WORKERS"
+    echo "  CONCURRENCY:     $CONCURRENCY"
+    echo "  LOG_LEVEL:       $LOG_LEVEL"
+    echo "  CONFIG_FILE:     $CONFIG_FILE"
+    echo "  PROXY_MODULE:    $PROXY_MODULE"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo ""
+  } | tee -a "$LOG_FILE"
+  
+  # Check if virtual environment exists and is valid
+  VENV_CMD=""
+  if [ "$USE_VENV" = "true" ]; then
+    if [ -f "$VENV_ACTIVATE" ]; then
+      echo "✓ Using Python virtual environment: $VENV_DIR"
+      VENV_CMD="source $VENV_ACTIVATE && "
+    else
+      echo "✗ Virtual environment activation FAILED!"
+      echo ""
+      echo "Reasons:"
+      if [ ! -d "$VENV_DIR" ]; then
+        echo "  1. VENV_DIR does not exist: $VENV_DIR"
+      else
+        echo "  1. VENV_DIR exists but activate script missing"
+      fi
+      if [ ! -f "$VENV_ACTIVATE" ]; then
+        echo "  2. Activate script not found: $VENV_ACTIVATE"
+      fi
+      echo ""
+      echo "To fix this, run:"
+      echo "  python3 -m venv $VENV_DIR"
+      echo "  source $VENV_ACTIVATE"
+      echo "  pip install -r requirements.txt"
+      echo ""
+      echo "Or disable venv with: export USE_VENV=false"
+      return 1
+    fi
   else
-    echo "⚠ Virtual environment not found at $VENV_DIR"
-    echo "  Tip: Create venv with: python -m venv $VENV_DIR"
-    echo "  Tip: Or set VENV_DIR to another location"
-    VENV_CMD=""
+    echo "⚠ Virtual environment disabled (USE_VENV=false)"
   fi
   
   # Start proxy with nohup, logging to current folder
   nohup bash -c "
-    $VENV_CMD
+    set -x  # Enable debug mode to see what's happening
+    echo '[STARTUP] Starting Ollama Guard Proxy...'
+    echo '[DEBUG] Bash version:' \"\$BASH_VERSION\"
+    
+    # Set working directory and Python path
+    cd '$SCRIPT_DIR'
+    export PYTHONPATH=\"$SCRIPT_DIR:\$PYTHONPATH\"
+    echo '[PATH] Working directory:' \$(pwd)
+    echo '[PATH] PYTHONPATH:' \$PYTHONPATH
+    
+    # Try to activate venv
+    if [ -n \"$VENV_CMD\" ]; then
+      echo '[VENV] Attempting to activate: $VENV_ACTIVATE'
+      $VENV_CMD echo '[VENV] Successfully activated'
+      if [ \$? -ne 0 ]; then
+        echo '[ERROR] Failed to activate virtual environment'
+        exit 1
+      fi
+    fi
+    
+    # Show Python info
+    echo '[PYTHON] Python path:' \$(which python)
+    echo '[PYTHON] Python version:' \$(python --version 2>&1)
+    
+    # Check uvicorn
+    if ! python -c 'import uvicorn' 2>&1; then
+      echo '[ERROR] uvicorn not installed. Install with: pip install uvicorn'
+      exit 1
+    fi
+    echo '[UVICORN] uvicorn is available'
+    
+    # Check if guardrails module can be imported
+    echo '[GUARD] Testing guardrails module import...'
+    if ! python -c 'from guardrails.config import Config' 2>&1; then
+      echo '[ERROR] Failed to import guardrails.config'
+      echo '[ERROR] Current directory:' \$(pwd)
+      echo '[ERROR] PYTHONPATH: '\$PYTHONPATH
+      echo '[ERROR] Contents of current directory:'
+      ls -la | head -20
+      exit 1
+    fi
+    echo '[GUARD] Successfully imported guardrails.config'
+    
+    # Export environment variables
     export OLLAMA_URL=\"\${OLLAMA_URL:-http://127.0.0.1:11434}\"
     export PROXY_PORT=\"$PORT\"
     export CONFIG_FILE=\"$CONFIG_FILE\"
@@ -110,6 +246,14 @@ start_proxy() {
     export IP_WHITELIST=\"\${IP_WHITELIST:-}\"
     export IP_BLACKLIST=\"\${IP_BLACKLIST:-}\"
     
+    echo '[START] Running uvicorn with config:'
+    echo '[START]   Module: $PROXY_MODULE'
+    echo '[START]   Host: $HOST'
+    echo '[START]   Port: $PORT'
+    echo '[START]   Workers: $WORKERS'
+    echo '[START]   Log Level: $LOG_LEVEL'
+    echo ''
+    
     uvicorn $PROXY_MODULE \\
       --host $HOST \\
       --port $PORT \\
@@ -119,16 +263,23 @@ start_proxy() {
   
   local pid=$!
   echo "$pid" > "$PID_FILE"
-  sleep 1
+  sleep 2  # Give more time to detect startup errors
   
   # Verify process started
   if ps -p "$pid" > /dev/null 2>&1; then
     echo "✓ Proxy started successfully (PID: $pid)"
     echo "✓ Log file: $LOG_FILE"
     echo "✓ Access: http://$HOST:$PORT/health"
+    echo ""
+    echo "View logs with: tail -f $LOG_FILE"
     return 0
   else
-    echo "✗ Failed to start proxy"
+    echo "✗ Failed to start proxy (PID: $pid died)"
+    echo ""
+    echo "Debug information:"
+    echo "─────────────────────────────────────────────────────────────"
+    tail -30 "$LOG_FILE" 2>/dev/null || echo "(No log file available)"
+    echo "─────────────────────────────────────────────────────────────"
     return 1
   fi
 }
@@ -331,38 +482,230 @@ EOF
 
 run_interactive() {
 
-  # Check if Python is available
-  if ! command -v python3.12 &> /dev/null; then
-    echo "✗ Error: Python not found. Please install Python 3.9+"
+  echo "╔════════════════════════════════════════════════════════════════╗"
+  echo "║         Ollama Guard Proxy - DEBUG Mode Startup                 ║"
+  echo "╚════════════════════════════════════════════════════════════════╝"
+  echo ""
+  
+  # Set working directory and Python path immediately
+  cd "$SCRIPT_DIR"
+  export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
+  echo "Note: Working directory set to: $(pwd)"
+  echo "Note: PYTHONPATH includes: $SCRIPT_DIR"
+  echo ""
+  
+  # ======================================================================
+  # 1. CHECK PYTHON AVAILABILITY
+  # ======================================================================
+  echo "Step 1: Checking Python availability..."
+  echo "─────────────────────────────────────────────────────────────────"
+  
+  PYTHON_CMD=""
+  for py_version in python3.12 python3.11 python3.10 python3.9 python3 python; do
+    if command -v "$py_version" &> /dev/null; then
+      echo "✓ Found: $py_version"
+      version=$($py_version --version 2>&1)
+      echo "  Version: $version"
+      PYTHON_CMD="$py_version"
+      break
+    fi
+  done
+  
+  if [ -z "$PYTHON_CMD" ]; then
+    echo "✗ Error: No Python found. Please install Python 3.9+"
+    echo ""
+    echo "Debug Info:"
+    echo "  PATH: $PATH"
+    echo "  which python3: $(which python3 2>&1 || echo 'NOT FOUND')"
+    echo "  which python: $(which python 2>&1 || echo 'NOT FOUND')"
     exit 1
   fi
-
-  # Check and activate virtual environment
+  echo ""
+  
+  # ======================================================================
+  # 2. CHECK AND ACTIVATE VIRTUAL ENVIRONMENT
+  # ======================================================================
+  echo "Step 2: Checking Virtual Environment..."
+  echo "─────────────────────────────────────────────────────────────────"
+  echo "  USE_VENV:      $USE_VENV"
+  echo "  VENV_DIR:      $VENV_DIR"
+  echo "  VENV_ACTIVATE: $VENV_ACTIVATE"
+  echo ""
+  
+  VENV_ACTIVATED=false
+  
   if [ "$USE_VENV" = "true" ]; then
-    if [ -f "$VENV_ACTIVATE" ]; then
-      echo "✓ Activating Python virtual environment: $VENV_DIR"
-      source "$VENV_ACTIVATE"
+    # Check directory
+    if [ ! -d "$VENV_DIR" ]; then
+      echo "✗ Virtual environment directory does NOT exist:"
+      echo "  Expected: $VENV_DIR"
+      echo ""
+      echo "Debug Info:"
+      ls -la "$(dirname "$VENV_DIR")" 2>/dev/null | grep -E "^d|^total" || echo "(parent directory not accessible)"
+      echo ""
+      echo "Fix: Create venv with:"
+      echo "  $PYTHON_CMD -m venv $VENV_DIR"
+      echo "  source $VENV_ACTIVATE"
+      echo "  pip install -r requirements.txt"
+      echo ""
+      read -p "Create venv now? (y/n) " -n 1 -r
+      echo
+      if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Creating virtual environment..."
+        $PYTHON_CMD -m venv "$VENV_DIR" || { echo "✗ Failed to create venv"; exit 1; }
+        echo "✓ Venv created"
+      else
+        echo "Continuing without venv (will use system Python)..."
+        USE_VENV=false
+      fi
     else
-      echo "⚠ Virtual environment not found at $VENV_DIR"
-      echo "  Tip: Create venv with: python -m venv $VENV_DIR"
-      echo "  Tip: Or set VENV_DIR to another location"
-      echo "  Continuing with system Python..."
+      echo "✓ Virtual environment directory exists"
+    fi
+    
+    # Check activate script
+    if [ -f "$VENV_ACTIVATE" ]; then
+      echo "✓ Activate script found"
+      
+      # Try to source it
+      if source "$VENV_ACTIVATE" 2>&1; then
+        echo "✓ Successfully activated virtual environment"
+        VENV_ACTIVATED=true
+      else
+        echo "✗ Failed to activate virtual environment"
+        echo "  Error output:"
+        source "$VENV_ACTIVATE" 2>&1 | sed 's/^/    /'
+        exit 1
+      fi
+    else
+      echo "✗ Activate script NOT found: $VENV_ACTIVATE"
+      echo ""
+      echo "Expected structure:"
+      echo "  $VENV_DIR/"
+      echo "  ├── bin/"
+      echo "  │   ├── activate           <-- THIS IS MISSING"
+      echo "  │   ├── python"
+      echo "  │   └── pip"
+      echo "  └── lib/"
+      echo ""
+      echo "Current directory contents:"
+      if [ -d "$VENV_DIR" ]; then
+        ls -la "$VENV_DIR/" | head -15
+      fi
+      exit 1
+    fi
+    
+    # Check for python in venv
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    if [ ! -f "$VENV_PYTHON" ]; then
+      echo "✗ Python executable NOT found in venv: $VENV_PYTHON"
+      exit 1
+    fi
+    echo "✓ Python in venv: $($VENV_PYTHON --version 2>&1)"
+    
+  else
+    echo "⚠ Virtual environment disabled (USE_VENV=false)"
+    echo "  Using system Python: $PYTHON_CMD"
+  fi
+  echo ""
+  
+  # ======================================================================
+  # 3. CHECK REQUIREMENTS
+  # ======================================================================
+  echo "Step 3: Checking Dependencies..."
+  echo "─────────────────────────────────────────────────────────────────"
+  
+  # Check if requirements.txt exists
+  if [ ! -f requirements.txt ]; then
+    echo "⚠ Warning: requirements.txt not found"
+    echo "  Skipping dependency check"
+  else
+    echo "✓ requirements.txt found"
+    echo ""
+    echo "  Checking required packages:"
+    
+    # Array of critical packages to check
+    CRITICAL_PACKAGES=("uvicorn" "fastapi" "pydantic" "requests")
+    MISSING_PACKAGES=()
+    
+    # Check each critical package
+    for pkg in "${CRITICAL_PACKAGES[@]}"; do
+      # Convert package name to import name (e.g., llm-guard -> llm_guard)
+      import_name="${pkg//-/_}"
+      
+      if $PYTHON_CMD -c "import $import_name" 2>/dev/null; then
+        version=$($PYTHON_CMD -c "import $import_name; print(getattr($import_name, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")
+        echo "    ✓ $pkg (version: $version)"
+      else
+        echo "    ✗ $pkg NOT installed"
+        MISSING_PACKAGES+=("$pkg")
+      fi
+    done
+    
+    # Check llm-guard separately (special case)
+    if $PYTHON_CMD -c "import llm_guard" 2>/dev/null; then
+      version=$($PYTHON_CMD -c "import llm_guard; print(getattr(llm_guard, '__version__', 'unknown'))" 2>/dev/null || echo "unknown")
+      echo "    ✓ llm-guard (version: $version)"
+    else
+      echo "    ✗ llm-guard NOT installed"
+      MISSING_PACKAGES+=("llm-guard")
+    fi
+    
+    # If any packages are missing, prompt to install
+    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+      echo ""
+      echo "✗ Missing packages: ${MISSING_PACKAGES[*]}"
+      echo ""
+      echo "Install all dependencies with:"
+      if [ "$VENV_ACTIVATED" = true ]; then
+        echo "  pip install -r requirements.txt"
+      else
+        echo "  $PYTHON_CMD -m pip install -r requirements.txt"
+      fi
+      echo ""
+      read -p "Install missing packages now? (y/n) " -n 1 -r
+      echo
+      if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Installing dependencies..."
+        if [ "$VENV_ACTIVATED" = true ]; then
+          pip install -r requirements.txt || { echo "✗ Failed to install dependencies"; exit 1; }
+        else
+          $PYTHON_CMD -m pip install -r requirements.txt || { echo "✗ Failed to install dependencies"; exit 1; }
+        fi
+        echo "✓ Dependencies installed"
+      else
+        echo "Skipping installation. Some features may not work."
+      fi
+    else
+      echo ""
+      echo "✓ All required packages are installed"
     fi
   fi
-
-  # Check if uvicorn is installed
-  if ! python -c "import uvicorn" 2>/dev/null; then
-    echo "✗ Error: uvicorn not installed. Install with: pip install uvicorn"
-    exit 1
-  fi
-
-  # Check if config file exists
+  echo ""
+  
+  # ======================================================================
+  # 4. CHECK CONFIGURATION
+  # ======================================================================
+  echo "Step 4: Checking Configuration..."
+  echo "─────────────────────────────────────────────────────────────────"
+  
   if [ ! -f "$CONFIG_FILE" ]; then
-    echo "⚠ Warning: Config file '$CONFIG_FILE' not found. Using defaults."
+    echo "⚠ Warning: Config file '$CONFIG_FILE' not found"
+    echo "  The proxy will use default configuration"
+  else
+    echo "✓ Config file found: $CONFIG_FILE"
   fi
+  echo ""
+  
 
+  
+  # ======================================================================
+  # 5. FINAL STARTUP DISPLAY
+  # ======================================================================
+  echo "Step 5: Starting Uvicorn Server..."
+  echo "─────────────────────────────────────────────────────────────────"
+  
   # Export environment variables
-  export OLLAMA_URL="http://192.168.1.2:11434"
+  export OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
   export PROXY_PORT="$PORT"
   export CONFIG_FILE="$CONFIG_FILE"
   export NGINX_WHITELIST="${NGINX_WHITELIST:-}"
@@ -385,6 +728,7 @@ run_interactive() {
   fi
 
   # Display startup information
+  echo ""
   echo "╔════════════════════════════════════════════════════════════════╗"
   echo "║         Ollama Guard Proxy - Uvicorn Server                    ║"
   echo "╠════════════════════════════════════════════════════════════════╣"
@@ -392,42 +736,43 @@ run_interactive() {
   echo "║   Host:       $HOST"
   echo "║   Port:       $PORT"
   echo "║   Workers:    $WORKERS"
-  echo "║ Python Environment:"
-  if [ "$USE_VENV" = "true" ]; then
-    if [ -f "$VENV_ACTIVATE" ]; then
-      echo "║   Venv:       $VENV_DIR (ACTIVE)"
-    else
-      echo "║   Venv:       $VENV_DIR (NOT FOUND - using system Python)"
-    fi
+  echo "║   Python Env:"
+  if [ "$VENV_ACTIVATED" = true ]; then
+    echo "║     ✓ Venv: $VENV_DIR (ACTIVE)"
   else
-    echo "║   Venv:       DISABLED (using system Python)"
+    echo "║     ✓ System Python: $PYTHON_CMD"
   fi
+  echo "║"
   echo "║ Runtime Settings:"
   echo "║   Concurrency:     $CONCURRENCY per worker"
   echo "║   Log Level:       $LOG_LEVEL"
   echo "║   Reload:         $RELOAD"
   echo "║   Config File:    $CONFIG_FILE"
-  echo "╠════════════════════════════════════════════════════════════════╣"
+  echo "║   Working Dir:    $(pwd)"
+  echo "║   PYTHONPATH:     $PYTHONPATH"
+  echo "║"
   echo "║ Environment Variables:"
   echo "║   OLLAMA_URL:              $OLLAMA_URL"
   echo "║   NGINX_WHITELIST:         ${NGINX_WHITELIST:-empty (unrestricted)}"
   echo "║   ENABLE_INPUT_GUARD:      ${ENABLE_INPUT_GUARD:-not set}"
   echo "║   ENABLE_OUTPUT_GUARD:     ${ENABLE_OUTPUT_GUARD:-not set}"
   echo "║   ENABLE_IP_FILTER:        ${ENABLE_IP_FILTER:-not set}"
-  echo "║   IP_WHITELIST:            ${IP_WHITELIST:-not set}"
-  echo "║   IP_BLACKLIST:            ${IP_BLACKLIST:-not set}"
-  echo "╠════════════════════════════════════════════════════════════════╣"
+  echo "║"
   echo "║ Testing proxy:"
   echo "║   curl http://$HOST:$PORT/health"
-  echo "║ Generating:"
+  echo "║"
+  echo "║ Send request:"
   echo "║   curl -X POST http://$HOST:$PORT/v1/generate \\"
+  echo "║     -H 'Content-Type: application/json' \\"
   echo "║     -d '{\"model\":\"mistral\",\"prompt\":\"test\"}'"
+  echo "║"
+  echo "║ Command: $UVICORN_CMD"
   echo "╚════════════════════════════════════════════════════════════════╝"
+  echo ""
+  echo "Server starting... (Press Ctrl+C to stop)"
   echo ""
 
   # Run Uvicorn with configuration
-  echo "Starting server: $UVICORN_CMD"
-  echo ""
   exec $UVICORN_CMD
 }
 

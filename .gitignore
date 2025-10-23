@@ -84,3 +84,5 @@ docs/_build/
 
 # Local virtualenv created by python -m venv
 .Python
+
+*.pid
