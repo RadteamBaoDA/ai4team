@@ -39,6 +39,10 @@ class Config:
         self._raw['enable_input_guard'] = bool_env('ENABLE_INPUT_GUARD', True)
         self._raw['enable_output_guard'] = bool_env('ENABLE_OUTPUT_GUARD', True)
         self._raw['block_on_guard_error'] = bool_env('BLOCK_ON_GUARD_ERROR', False)
+        
+        # Local models configuration
+        self._raw['use_local_models'] = bool_env('LLM_GUARD_USE_LOCAL_MODELS', False)
+        self._raw['models_path'] = env_or('LLM_GUARD_MODELS_PATH', data.get('models_path', './models'))
 
         nginx_env = os.environ.get('NGINX_WHITELIST')
         if nginx_env:
