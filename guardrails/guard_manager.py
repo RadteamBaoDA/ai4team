@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Dict, Any, List, Tuple
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,14 @@ try:
     )
     from llm_guard.vault import Vault
 
+    # Import model configurations for local model support
+    from llm_guard.input_scanners.anonymize_helpers import DEBERTA_AI4PRIVACY_v2_CONF
+    from llm_guard.input_scanners.code import DEFAULT_MODEL as CODE_MODEL
+    from llm_guard.input_scanners.prompt_injection import V2_MODEL as PROMPT_INJECTION_MODEL
+    from llm_guard.input_scanners.toxicity import DEFAULT_MODEL as TOXICITY_INPUT_MODEL
+    from llm_guard.output_scanners.toxicity import DEFAULT_MODEL as TOXICITY_OUTPUT_MODEL
+    from llm_guard.output_scanners.code import DEFAULT_MODEL as OUTPUT_CODE_MODEL
+
     HAS_LLM_GUARD = True
     logger.info('llm-guard modules imported successfully')
     
@@ -35,6 +44,10 @@ except ImportError as e:
     InputCode = TokenLimit = Anonymize = None
     OutputBanSubstrings = OutputToxicity = MaliciousURLs = NoRefusal = OutputCode = None
     Vault = None
+    # Model configuration placeholders
+    DEBERTA_AI4PRIVACY_v2_CONF = None
+    CODE_MODEL = PROMPT_INJECTION_MODEL = TOXICITY_INPUT_MODEL = None
+    TOXICITY_OUTPUT_MODEL = OUTPUT_CODE_MODEL = None
 
 
 class LLMGuardManager:
@@ -54,6 +67,9 @@ class LLMGuardManager:
         self.enable_output = enable_output and HAS_LLM_GUARD
         self.enable_anonymize = enable_anonymize and HAS_LLM_GUARD
         
+        # Check if local models should be used
+        self.use_local_models = self._check_local_models_config()
+        
         self.input_scanners = []
         self.output_scanners = []
         self.vault = None
@@ -61,6 +77,10 @@ class LLMGuardManager:
         if not HAS_LLM_GUARD:
             logger.warning('LLM Guard not installed; guard features disabled')
             return
+        
+        # Configure local models if enabled
+        if self.use_local_models:
+            self._configure_local_models()
         
         # Initialize vault for anonymization
         if self.enable_anonymize:
@@ -76,6 +96,62 @@ class LLMGuardManager:
         if self.enable_output:
             self._init_output_scanners()
 
+    def _check_local_models_config(self) -> bool:
+        """Check if local models should be used based on environment variables."""
+        use_local = os.environ.get('LLM_GUARD_USE_LOCAL_MODELS', '').lower() in ('1', 'true', 'yes', 'on')
+        if use_local:
+            logger.info('Local models enabled via LLM_GUARD_USE_LOCAL_MODELS environment variable')
+        return use_local
+
+    def _configure_local_models(self):
+        """Configure model paths and settings for local model usage."""
+        if not HAS_LLM_GUARD:
+            return
+            
+        try:
+            # Get base path for local models
+            models_base_path = os.environ.get('LLM_GUARD_MODELS_PATH', './models')
+            
+            # Configure Prompt Injection model
+            if PROMPT_INJECTION_MODEL:
+                PROMPT_INJECTION_MODEL.kwargs["local_files_only"] = True
+                PROMPT_INJECTION_MODEL.path = os.path.join(models_base_path, "deberta-v3-base-prompt-injection-v2")
+                logger.info(f'Configured PromptInjection model path: {PROMPT_INJECTION_MODEL.path}')
+            
+            # Configure Anonymize model
+            if DEBERTA_AI4PRIVACY_v2_CONF and "DEFAULT_MODEL" in DEBERTA_AI4PRIVACY_v2_CONF:
+                DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path = os.path.join(models_base_path, "deberta-v3-base_finetuned_ai4privacy_v2")
+                DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].kwargs["local_files_only"] = True
+                logger.info(f'Configured Anonymize model path: {DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path}')
+            
+            # Configure Toxicity models
+            if TOXICITY_INPUT_MODEL:
+                TOXICITY_INPUT_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
+                TOXICITY_INPUT_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured input Toxicity model path: {TOXICITY_INPUT_MODEL.path}')
+            
+            if TOXICITY_OUTPUT_MODEL:
+                TOXICITY_OUTPUT_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
+                TOXICITY_OUTPUT_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured output Toxicity model path: {TOXICITY_OUTPUT_MODEL.path}')
+            
+            # Configure Code models
+            if CODE_MODEL:
+                CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
+                CODE_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured input Code model path: {CODE_MODEL.path}')
+            
+            if OUTPUT_CODE_MODEL:
+                OUTPUT_CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
+                OUTPUT_CODE_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured output Code model path: {OUTPUT_CODE_MODEL.path}')
+            
+            logger.info('Local model configuration completed')
+            
+        except Exception as e:
+            logger.exception('Failed to configure local models: %s', e)
+            self.use_local_models = False
+
     def _init_input_scanners(self):
         """Initialize input scanners (no Guard() wrapper)."""
         try:
@@ -88,17 +164,29 @@ class LLMGuardManager:
                 },
                 {
                     'name': 'PromptInjection',
-                    'scanner': PromptInjection(),
+                    'scanner': PromptInjection(model=PROMPT_INJECTION_MODEL if self.use_local_models else None),
                     'enabled': True
                 },
                 {
                     'name': 'Toxicity',
-                    'scanner': InputToxicity(threshold=0.5),
+                    'scanner': InputToxicity(
+                        threshold=0.5,
+                        model=TOXICITY_INPUT_MODEL if self.use_local_models else None
+                    ),
                     'enabled': True
                 },
                 {
                     'name': 'Secrets',
                     'scanner': Secrets(),
+                    'enabled': True
+                },
+                {
+                    'name': 'Code',
+                    'scanner': InputCode(
+                        languages=code_language,
+                        is_blocked=True,
+                        model=CODE_MODEL if self.use_local_models else None
+                    ),
                     'enabled': True
                 },
                 {
@@ -111,12 +199,16 @@ class LLMGuardManager:
             # Add Anonymize scanner if vault is available
             if self.enable_anonymize and self.vault:
                 try:
+                    # Use local model configuration if enabled
+                    recognizer_conf = DEBERTA_AI4PRIVACY_v2_CONF if self.use_local_models else None
+                    
                     anonymize_scanner = Anonymize(
                         self.vault,
                         preamble="Insert before prompt",
                         allowed_names=["John Doe"],
                         hidden_names=["Test LLC"],
-                        language="en"
+                        language="en",
+                        recognizer_conf=recognizer_conf
                     )
                     self.input_scanners.append({
                         'name': 'Anonymize',
@@ -127,7 +219,8 @@ class LLMGuardManager:
                 except Exception as e:
                     logger.warning('Failed to add Anonymize scanner: %s', e)
             
-            logger.info('Input scanners initialized: %d scanners ready', len(self.input_scanners))
+            logger.info('Input scanners initialized: %d scanners ready (local_models: %s)', 
+                       len(self.input_scanners), self.use_local_models)
         except Exception as e:
             logger.exception('Failed to init input scanners: %s', e)
             self.input_scanners = []
@@ -144,7 +237,10 @@ class LLMGuardManager:
                 },
                 {
                     'name': 'Toxicity',
-                    'scanner': OutputToxicity(threshold=0.5),
+                    'scanner': OutputToxicity(
+                        threshold=0.5,
+                        model=TOXICITY_OUTPUT_MODEL if self.use_local_models else None
+                    ),
                     'enabled': True
                 },
                 {
@@ -159,12 +255,17 @@ class LLMGuardManager:
                 },
                 {
                     'name': 'Code',
-                    'scanner': OutputCode(languages=code_language, is_blocked=True),
+                    'scanner': OutputCode(
+                        languages=code_language,
+                        is_blocked=True,
+                        model=OUTPUT_CODE_MODEL if self.use_local_models else None
+                    ),
                     'enabled': True
                 },
             ]
             
-            logger.info('Output scanners initialized: %d scanners ready', len(self.output_scanners))
+            logger.info('Output scanners initialized: %d scanners ready (local_models: %s)', 
+                       len(self.output_scanners), self.use_local_models)
         except Exception as e:
             logger.exception('Failed to init output scanners: %s', e)
             self.output_scanners = []

@@ -29,6 +29,14 @@ enable_output_guard: true
 # If false, errors are logged but requests are allowed
 block_on_guard_error: true
 
+# Local Models Configuration
+# Set to true to use locally downloaded models instead of downloading from HuggingFace
+use_local_models: false
+
+# Path to directory containing local models
+# Models should be organized in subdirectories by model name
+models_path: "./models"
+
 # Input Scanner Configuration
 input_scanners:
   ban_substrings:
