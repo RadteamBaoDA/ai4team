@@ -33,10 +33,12 @@ import os
 import json
 import logging
 import re
- 
+import time
+import uuid
+
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
- 
+
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -129,6 +131,63 @@ def extract_text_from_response(data: Any) -> str:
         if text:
             return text
     return str(data)
+
+
+def combine_messages_text(messages: List[Dict[str, Any]]) -> str:
+    """Combine message contents into a single string for guard scanning."""
+    if not isinstance(messages, list):
+        return ""
+
+    combined: List[str] = []
+    for msg in messages:
+        if isinstance(msg, dict) and isinstance(msg.get('content'), str):
+            combined.append(msg['content'])
+    return "\n".join(combined)
+
+
+def build_ollama_options_from_openai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Map relevant OpenAI parameters to Ollama options."""
+    if not isinstance(payload, dict):
+        return {}
+
+    option_keys = {
+        'temperature': 'temperature',
+        'top_p': 'top_p',
+        'top_k': 'top_k',
+        'repeat_penalty': 'repeat_penalty',
+        'num_ctx': 'num_ctx',
+        'seed': 'seed',
+        'stop': 'stop',
+        'presence_penalty': 'presence_penalty',
+        'frequency_penalty': 'frequency_penalty',
+    }
+
+    options: Dict[str, Any] = dict(payload.get('options', {})) if isinstance(payload.get('options'), dict) else {}
+
+    for openai_key, ollama_key in option_keys.items():
+        if openai_key in payload and payload[openai_key] is not None:
+            options[ollama_key] = payload[openai_key]
+
+    max_tokens = payload.get('max_tokens')
+    if isinstance(max_tokens, int) and max_tokens > 0:
+        options['num_predict'] = max_tokens
+
+    return options
+
+
+def format_sse_event(data: Dict[str, Any]) -> bytes:
+    """Serialize a chunk for Server-Sent Events streaming."""
+    return f"data: {json.dumps(data)}\n\n".encode()
+
+
+def extract_prompt_from_completion_payload(payload: Dict[str, Any]) -> str:
+    """Extract prompt text for OpenAI completion payloads."""
+    prompt = payload.get('prompt')
+    if isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, list):
+        return "\n".join(str(item) for item in prompt if isinstance(item, (str, int, float)))
+    return str(prompt) if prompt is not None else ""
 
 
 @app.middleware("http")
@@ -318,6 +377,357 @@ async def stream_response_with_guard(response, detected_lang: str = 'en'):
         yield (json.dumps({"error": str(e), "message": error_message}) + '\n').encode()
 
 
+async def stream_openai_chat_response(response, model: str, detected_lang: str = 'en'):
+    """Stream OpenAI-compatible chat completions with guard scanning."""
+    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created_ts = int(time.time())
+    total_text = ""
+    scan_buffer = ""
+    sent_role_chunk = False
+    block_on_error = config.get('block_on_guard_error', False)
+
+    try:
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+
+            try:
+                data = json.loads(raw_line)
+            except json.JSONDecodeError:
+                logger.debug("Skipping non-JSON streaming chunk: %s", raw_line)
+                continue
+
+            if isinstance(data, dict) and data.get('error'):
+                error_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "error"
+                        }
+                    ],
+                    "error": data['error']
+                }
+                yield format_sse_event(error_chunk)
+                yield b"data: [DONE]\n\n"
+                return
+
+            message = data.get('message', {}) if isinstance(data, dict) else {}
+            delta_text = message.get('content', '') if isinstance(message, dict) else ''
+
+            if delta_text:
+                if not sent_role_chunk:
+                    role_chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant"
+                                },
+                                "finish_reason": None
+                            }
+                        ]
+                    }
+                    yield format_sse_event(role_chunk)
+                    sent_role_chunk = True
+
+                total_text += delta_text
+                scan_buffer += delta_text
+
+                if config.get('enable_output_guard', True) and len(scan_buffer) >= 500:
+                    scan_result = guard_manager.scan_output(scan_buffer, block_on_error=block_on_error)
+                    if not scan_result.get('allowed', True):
+                        logger.warning("Streaming OpenAI output blocked: %s", scan_result)
+                        error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                        block_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_ts,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {
+                                        "content": error_message
+                                    },
+                                    "finish_reason": "content_filter"
+                                }
+                            ],
+                            "guard": scan_result
+                        }
+                        yield format_sse_event(block_chunk)
+                        yield b"data: [DONE]\n\n"
+                        return
+                    scan_buffer = ""
+
+                content_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "content": delta_text
+                            },
+                            "finish_reason": None
+                        }
+                    ]
+                }
+                yield format_sse_event(content_chunk)
+
+            if data.get('done'):
+                usage = {
+                    "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+                    "completion_tokens": int(data.get('eval_count', 0) or 0),
+                }
+                usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
+
+                remaining_text = scan_buffer or (total_text if len(total_text) <= 500 else "")
+                if config.get('enable_output_guard', True) and remaining_text:
+                    scan_result = guard_manager.scan_output(remaining_text, block_on_error=block_on_error)
+                    if not scan_result.get('allowed', True):
+                        logger.warning("Final OpenAI streaming output blocked: %s", scan_result)
+                        error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                        block_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_ts,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {
+                                        "content": error_message
+                                    },
+                                    "finish_reason": "content_filter"
+                                }
+                            ],
+                            "guard": scan_result,
+                            "usage": usage
+                        }
+                        yield format_sse_event(block_chunk)
+                        yield b"data: [DONE]\n\n"
+                        return
+
+                final_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop"
+                        }
+                    ],
+                    "usage": usage
+                }
+                yield format_sse_event(final_chunk)
+                yield b"data: [DONE]\n\n"
+                return
+
+    except Exception as exc:
+        logger.error("Error during OpenAI streaming: %s", exc)
+        error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+        error_chunk = {
+            "id": f"chatcmpl-{uuid.uuid4().hex}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "content": error_message
+                    },
+                    "finish_reason": "error"
+                }
+            ]
+        }
+        yield format_sse_event(error_chunk)
+        yield b"data: [DONE]\n\n"
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+
+
+async def stream_openai_completion_response(response, model: str, detected_lang: str = 'en'):
+    """Stream OpenAI-compatible text completions with guard scanning."""
+    completion_id = f"cmpl-{uuid.uuid4().hex}"
+    created_ts = int(time.time())
+    total_text = ""
+    scan_buffer = ""
+    block_on_error = config.get('block_on_guard_error', False)
+
+    try:
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+
+            try:
+                data = json.loads(raw_line)
+            except json.JSONDecodeError:
+                logger.debug("Skipping non-JSON completion chunk: %s", raw_line)
+                continue
+
+            if isinstance(data, dict) and data.get('error'):
+                error_chunk = {
+                    "id": completion_id,
+                    "object": "text_completion",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "text": "",
+                            "logprobs": None,
+                            "finish_reason": "error"
+                        }
+                    ],
+                    "error": data['error']
+                }
+                yield format_sse_event(error_chunk)
+                yield b"data: [DONE]\n\n"
+                return
+
+            delta_text = data.get('response', '') if isinstance(data, dict) else ''
+
+            if delta_text:
+                total_text += delta_text
+                scan_buffer += delta_text
+
+                if config.get('enable_output_guard', True) and len(scan_buffer) >= 500:
+                    scan_result = guard_manager.scan_output(scan_buffer, block_on_error=block_on_error)
+                    if not scan_result.get('allowed', True):
+                        logger.warning("Streaming completion output blocked: %s", scan_result)
+                        error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                        block_chunk = {
+                            "id": completion_id,
+                            "object": "text_completion",
+                            "created": created_ts,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "text": error_message,
+                                    "logprobs": None,
+                                    "finish_reason": "content_filter"
+                                }
+                            ],
+                            "guard": scan_result
+                        }
+                        yield format_sse_event(block_chunk)
+                        yield b"data: [DONE]\n\n"
+                        return
+                    scan_buffer = ""
+
+                chunk = {
+                    "id": completion_id,
+                    "object": "text_completion",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "text": delta_text,
+                            "logprobs": None,
+                            "finish_reason": None
+                        }
+                    ]
+                }
+                yield format_sse_event(chunk)
+
+            if data.get('done'):
+                usage = {
+                    "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+                    "completion_tokens": int(data.get('eval_count', 0) or 0)
+                }
+                usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
+
+                remaining_text = scan_buffer or (total_text if len(total_text) <= 500 else "")
+                if config.get('enable_output_guard', True) and remaining_text:
+                    scan_result = guard_manager.scan_output(remaining_text, block_on_error=block_on_error)
+                    if not scan_result.get('allowed', True):
+                        logger.warning("Final completion output blocked: %s", scan_result)
+                        error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                        block_chunk = {
+                            "id": completion_id,
+                            "object": "text_completion",
+                            "created": created_ts,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "text": error_message,
+                                    "logprobs": None,
+                                    "finish_reason": "content_filter"
+                                }
+                            ],
+                            "guard": scan_result,
+                            "usage": usage
+                        }
+                        yield format_sse_event(block_chunk)
+                        yield b"data: [DONE]\n\n"
+                        return
+
+                final_chunk = {
+                    "id": completion_id,
+                    "object": "text_completion",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "text": "",
+                            "logprobs": None,
+                            "finish_reason": "stop"
+                        }
+                    ],
+                    "usage": usage
+                }
+                yield format_sse_event(final_chunk)
+                yield b"data: [DONE]\n\n"
+                return
+
+    except Exception as exc:
+        logger.error("Error during OpenAI completion streaming: %s", exc)
+        error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+        error_chunk = {
+            "id": f"cmpl-{uuid.uuid4().hex}",
+            "object": "text_completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "text": error_message,
+                    "logprobs": None,
+                    "finish_reason": "error"
+                }
+            ]
+        }
+        yield format_sse_event(error_chunk)
+        yield b"data: [DONE]\n\n"
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+
+
 @app.post("/api/chat")
 async def proxy_chat(request: Request):
     """Proxy endpoint for Ollama /api/chat."""
@@ -418,6 +828,293 @@ async def proxy_chat(request: Request):
                     )
         
         return JSONResponse(status_code=200, content=data)
+
+
+@app.post("/v1/chat/completions")
+async def openai_chat_completions(request: Request):
+    """OpenAI-compatible chat completions endpoint with guard integration."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        logger.error("Invalid OpenAI request JSON: %s", exc)
+        raise HTTPException(status_code=400, detail={"error": "invalid_json", "message": str(exc)})
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail={"error": "invalid_payload", "message": "Expected JSON object."})
+
+    messages = payload.get('messages')
+    if not isinstance(messages, list) or not messages:
+        raise HTTPException(status_code=400, detail={"error": "invalid_messages", "message": "messages must be a non-empty list."})
+
+    model = payload.get('model')
+    if not isinstance(model, str) or not model.strip():
+        raise HTTPException(status_code=400, detail={"error": "invalid_model", "message": "model is required."})
+
+    prompt_text = combine_messages_text(messages)
+    detected_lang = LanguageDetector.detect_language(prompt_text)
+
+    if config.get('enable_input_guard', True) and prompt_text:
+        input_result = guard_manager.scan_input(prompt_text, block_on_error=config.get('block_on_guard_error', False))
+        if not input_result.get('allowed', True):
+            logger.warning("OpenAI input blocked: %s", input_result)
+            reason = ', '.join([
+                f"{scanner_name}: {info.get('reason', 'Unknown')}"
+                for scanner_name, info in input_result.get('scanners', {}).items()
+                if not info.get('passed', True)
+            ])
+            error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "prompt_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": input_result
+                }
+            )
+
+    ollama_payload: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": bool(payload.get('stream', False))
+    }
+
+    options = build_ollama_options_from_openai_payload(payload)
+    if options:
+        ollama_payload['options'] = options
+
+    if isinstance(payload.get('tools'), list):
+        ollama_payload['tools'] = payload['tools']
+    if isinstance(payload.get('functions'), list):
+        ollama_payload['functions'] = payload['functions']
+
+    ollama_url = config.get('ollama_url')
+    url = f"{ollama_url.rstrip('/')}/api/chat"
+    is_stream = bool(payload.get('stream'))
+
+    try:
+        response = requests.post(url, json=ollama_payload, stream=is_stream, timeout=config.get('openai_timeout', 300))
+    except requests.RequestException as exc:
+        logger.error("OpenAI upstream error: %s", exc)
+        error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
+        raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
+
+    if response.status_code != 200:
+        logger.error("OpenAI upstream returned %s", response.status_code)
+        try:
+            upstream_detail = response.json()
+        except Exception:
+            upstream_detail = {"error": response.text}
+        raise HTTPException(status_code=response.status_code, detail=upstream_detail)
+
+    if is_stream:
+        return StreamingResponse(
+            stream_openai_chat_response(response, model, detected_lang),
+            media_type="text/event-stream"
+        )
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        logger.error("Failed to parse OpenAI upstream response: %s", exc)
+        error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+        raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+
+    output_text = ""
+    if isinstance(data, dict):
+        message = data.get('message')
+        if isinstance(message, dict):
+            output_text = message.get('content', '')
+
+    if config.get('enable_output_guard', True) and output_text:
+        output_result = guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
+        if not output_result.get('allowed', True):
+            logger.warning("OpenAI output blocked: %s", output_result)
+            error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "response_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": output_result
+                }
+            )
+
+    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created_ts = int(time.time())
+    usage = {
+        "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+        "completion_tokens": int(data.get('eval_count', 0) or 0)
+    }
+    usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
+
+    result = {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created_ts,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": output_text
+                },
+                "finish_reason": "stop" if data.get('done', True) else None
+            }
+        ],
+        "usage": usage
+    }
+
+    if 'system_fingerprint' in data:
+        result['system_fingerprint'] = data['system_fingerprint']
+
+    return JSONResponse(status_code=200, content=result)
+
+
+@app.post("/v1/completions")
+async def openai_completions(request: Request):
+    """OpenAI-compatible text completions endpoint with guard integration."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        logger.error("Invalid OpenAI completion JSON: %s", exc)
+        raise HTTPException(status_code=400, detail={"error": "invalid_json", "message": str(exc)})
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail={"error": "invalid_payload", "message": "Expected JSON object."})
+
+    model = payload.get('model')
+    if not isinstance(model, str) or not model.strip():
+        raise HTTPException(status_code=400, detail={"error": "invalid_model", "message": "model is required."})
+
+    prompt_text = extract_prompt_from_completion_payload(payload)
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail={"error": "invalid_prompt", "message": "prompt must be provided."})
+
+    detected_lang = LanguageDetector.detect_language(prompt_text)
+
+    if config.get('enable_input_guard', True) and prompt_text:
+        input_result = guard_manager.scan_input(prompt_text, block_on_error=config.get('block_on_guard_error', False))
+        if not input_result.get('allowed', True):
+            logger.warning("OpenAI completion input blocked: %s", input_result)
+            reason = ', '.join([
+                f"{scanner_name}: {info.get('reason', 'Unknown')}"
+                for scanner_name, info in input_result.get('scanners', {}).items()
+                if not info.get('passed', True)
+            ])
+            error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "prompt_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": input_result
+                }
+            )
+
+    ollama_payload: Dict[str, Any] = {
+        "model": model,
+        "prompt": prompt_text,
+        "stream": bool(payload.get('stream', False))
+    }
+
+    options = build_ollama_options_from_openai_payload(payload)
+    if options:
+        ollama_payload['options'] = options
+
+    if isinstance(payload.get('images'), list):
+        ollama_payload['images'] = payload['images']
+
+    ollama_url = config.get('ollama_url')
+    url = f"{ollama_url.rstrip('/')}/api/generate"
+    is_stream = bool(payload.get('stream'))
+
+    try:
+        response = requests.post(url, json=ollama_payload, stream=is_stream, timeout=config.get('openai_timeout', 300))
+    except requests.RequestException as exc:
+        logger.error("OpenAI completion upstream error: %s", exc)
+        error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
+        raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
+
+    if response.status_code != 200:
+        logger.error("OpenAI completion upstream returned %s", response.status_code)
+        try:
+            upstream_detail = response.json()
+        except Exception:
+            upstream_detail = {"error": response.text}
+        raise HTTPException(status_code=response.status_code, detail=upstream_detail)
+
+    if is_stream:
+        return StreamingResponse(
+            stream_openai_completion_response(response, model, detected_lang),
+            media_type="text/event-stream"
+        )
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        logger.error("Failed to parse completion upstream response: %s", exc)
+        error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+        raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+
+    output_text = extract_text_from_response(data)
+
+    if config.get('enable_output_guard', True) and output_text:
+        output_result = guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
+        if not output_result.get('allowed', True):
+            logger.warning("OpenAI completion output blocked: %s", output_result)
+            error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "response_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": output_result
+                }
+            )
+
+    completion_id = f"cmpl-{uuid.uuid4().hex}"
+    created_ts = int(time.time())
+    usage = {
+        "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+        "completion_tokens": int(data.get('eval_count', 0) or 0)
+    }
+    usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
+
+    result = {
+        "id": completion_id,
+        "object": "text_completion",
+        "created": created_ts,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "text": output_text,
+                "logprobs": None,
+                "finish_reason": "stop" if data.get('done', True) else None
+            }
+        ],
+        "usage": usage
+    }
+
+    if 'system_fingerprint' in data:
+        result['system_fingerprint'] = data['system_fingerprint']
+
+    return JSONResponse(status_code=200, content=result)
 
 
 @app.post("/api/pull")
@@ -548,6 +1245,42 @@ async def proxy_embed(request: Request):
         raise HTTPException(status_code=400, detail={"error": "invalid_json"})
 
     resp, err = forward_request('/api/embed', payload=payload, stream=False, timeout=30)
+    if err:
+        raise HTTPException(status_code=502, detail={"error": "upstream_error", "details": err})
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail={"error": "upstream_error"})
+    data, parse_err = safe_json(resp)
+    if data is None:
+        raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response"})
+    return JSONResponse(status_code=200, content=data)
+
+@app.post("/v1/embeddings")
+async def proxy_openai_embed(request: Request):
+    """Proxy endpoint for Ollama generate embeddings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid_json"})
+
+    resp, err = forward_request('/v1/embeddings', payload=payload, stream=False, timeout=30)
+    if err:
+        raise HTTPException(status_code=502, detail={"error": "upstream_error", "details": err})
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail={"error": "upstream_error"})
+    data, parse_err = safe_json(resp)
+    if data is None:
+        raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response"})
+    return JSONResponse(status_code=200, content=data)
+
+@app.post("/v1/models")
+async def proxy_openai_models(request: Request):
+    """Proxy endpoint for Ollama generate models."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid_json"})
+
+    resp, err = forward_request('/v1/models', payload=payload, stream=False, timeout=30)
     if err:
         raise HTTPException(status_code=502, detail={"error": "upstream_error", "details": err})
     if resp.status_code != 200:
