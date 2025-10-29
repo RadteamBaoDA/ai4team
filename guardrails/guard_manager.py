@@ -24,13 +24,13 @@ try:
         Code as OutputCode,
     )
     from llm_guard.vault import Vault
-
+    from llm_guard import scan_prompt
     # Import model configurations for local model support
     from llm_guard.input_scanners.anonymize_helpers import DEBERTA_AI4PRIVACY_v2_CONF
-    from llm_guard.input_scanners.code import DEFAULT_MODEL as CODE_MODEL
+    from llm_guard.input_scanners.code import DEFAULT_MODEL as INPUT_CODE_MODEL
     from llm_guard.input_scanners.prompt_injection import V2_MODEL as PROMPT_INJECTION_MODEL
-    from llm_guard.input_scanners.toxicity import DEFAULT_MODEL as TOXICITY_INPUT_MODEL
-    from llm_guard.output_scanners.toxicity import DEFAULT_MODEL as TOXICITY_OUTPUT_MODEL
+    from llm_guard.input_scanners.toxicity import DEFAULT_MODEL as INPUT_TOXICITY_MODEL
+    from llm_guard.output_scanners.toxicity import DEFAULT_MODEL as OUTPUT_TOXICITY_MODEL
     from llm_guard.output_scanners.code import DEFAULT_MODEL as OUTPUT_CODE_MODEL
 
     HAS_LLM_GUARD = True
@@ -44,10 +44,11 @@ except ImportError as e:
     InputCode = TokenLimit = Anonymize = None
     OutputBanSubstrings = OutputToxicity = MaliciousURLs = NoRefusal = OutputCode = None
     Vault = None
+    scan_prompt = None
     # Model configuration placeholders
     DEBERTA_AI4PRIVACY_v2_CONF = None
-    CODE_MODEL = PROMPT_INJECTION_MODEL = TOXICITY_INPUT_MODEL = None
-    TOXICITY_OUTPUT_MODEL = OUTPUT_CODE_MODEL = None
+    INPUT_CODE_MODEL = PROMPT_INJECTION_MODEL = INPUT_TOXICITY_MODEL = None
+    OUTPUT_TOXICITY_MODEL = OUTPUT_CODE_MODEL = None
 
 
 class LLMGuardManager:
@@ -124,23 +125,25 @@ class LLMGuardManager:
                 DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].kwargs["local_files_only"] = True
                 logger.info(f'Configured Anonymize model path: {DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path}')
             
-            # Configure Toxicity models
-            if TOXICITY_INPUT_MODEL:
-                TOXICITY_INPUT_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
-                TOXICITY_INPUT_MODEL.kwargs["local_files_only"] = True
-                logger.info(f'Configured input Toxicity model path: {TOXICITY_INPUT_MODEL.path}')
+            # Configure Input Toxicity model
+            if INPUT_TOXICITY_MODEL:
+                INPUT_TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
+                INPUT_TOXICITY_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured input Toxicity model path: {INPUT_TOXICITY_MODEL.path}')
             
-            if TOXICITY_OUTPUT_MODEL:
-                TOXICITY_OUTPUT_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
-                TOXICITY_OUTPUT_MODEL.kwargs["local_files_only"] = True
-                logger.info(f'Configured output Toxicity model path: {TOXICITY_OUTPUT_MODEL.path}')
+            # Configure Output Toxicity model
+            if OUTPUT_TOXICITY_MODEL:
+                OUTPUT_TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
+                OUTPUT_TOXICITY_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured output Toxicity model path: {OUTPUT_TOXICITY_MODEL.path}')
             
-            # Configure Code models
-            if CODE_MODEL:
-                CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
-                CODE_MODEL.kwargs["local_files_only"] = True
-                logger.info(f'Configured input Code model path: {CODE_MODEL.path}')
+            # Configure Input Code model
+            if INPUT_CODE_MODEL:
+                INPUT_CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
+                INPUT_CODE_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured input Code model path: {INPUT_CODE_MODEL.path}')
             
+            # Configure Output Code model
             if OUTPUT_CODE_MODEL:
                 OUTPUT_CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
                 OUTPUT_CODE_MODEL.kwargs["local_files_only"] = True
@@ -153,48 +156,45 @@ class LLMGuardManager:
             self.use_local_models = False
 
     def _init_input_scanners(self):
-        """Initialize input scanners (no Guard() wrapper)."""
+        """
+        Initialize input scanners for use with scan_prompt function.
+        Uses the official scan_prompt method from llm-guard library.
+        """
         try:
-            # Create each scanner individually
-            self.input_scanners = [
-                {
-                    'name': 'BanSubstrings',
-                    'scanner': InputBanSubstrings(["malicious", "dangerous"]),
-                    'enabled': True
-                },
-                {
-                    'name': 'PromptInjection',
-                    'scanner': PromptInjection(model=PROMPT_INJECTION_MODEL if self.use_local_models else None),
-                    'enabled': True
-                },
-                {
-                    'name': 'Toxicity',
-                    'scanner': InputToxicity(
-                        threshold=0.5,
-                        model=TOXICITY_INPUT_MODEL if self.use_local_models else None
-                    ),
-                    'enabled': True
-                },
-                {
-                    'name': 'Secrets',
-                    'scanner': Secrets(),
-                    'enabled': True
-                },
-                {
-                    'name': 'Code',
-                    'scanner': InputCode(
-                        languages=code_language,
-                        is_blocked=True,
-                        model=CODE_MODEL if self.use_local_models else None
-                    ),
-                    'enabled': True
-                },
-                {
-                    'name': 'TokenLimit',
-                    'scanner': TokenLimit(limit=4000),
-                    'enabled': True
-                },
-            ]
+            self.input_scanners = []
+            
+            # BanSubstrings scanner
+            self.input_scanners.append(
+                InputBanSubstrings(["malicious", "dangerous"])
+            )
+            
+            # PromptInjection scanner with local model support
+            self.input_scanners.append(
+                PromptInjection(model=PROMPT_INJECTION_MODEL if self.use_local_models else None)
+            )
+            
+            # Toxicity scanner with local model support
+            self.input_scanners.append(
+                InputToxicity(
+                    threshold=0.5,
+                    model=INPUT_TOXICITY_MODEL if self.use_local_models else None
+                )
+            )
+            
+            # Secrets scanner
+            self.input_scanners.append(Secrets())
+            
+            # Code scanner with local model support
+            self.input_scanners.append(
+                InputCode(
+                    languages=code_language,
+                    is_blocked=True,
+                    model=INPUT_CODE_MODEL if self.use_local_models else None
+                )
+            )
+            
+            # TokenLimit scanner
+            self.input_scanners.append(TokenLimit(limit=4000))
             
             # Add Anonymize scanner if vault is available
             if self.enable_anonymize and self.vault:
@@ -210,61 +210,37 @@ class LLMGuardManager:
                         language="en",
                         recognizer_conf=recognizer_conf
                     )
-                    self.input_scanners.append({
-                        'name': 'Anonymize',
-                        'scanner': anonymize_scanner,
-                        'enabled': True
-                    })
+                    self.input_scanners.append(anonymize_scanner)
                     logger.info('Anonymize scanner added to input scanners')
                 except Exception as e:
                     logger.warning('Failed to add Anonymize scanner: %s', e)
             
-            logger.info('Input scanners initialized: %d scanners ready (local_models: %s)', 
+            logger.info('Input scanners initialized: %d scanners ready for scan_prompt (local_models: %s)', 
                        len(self.input_scanners), self.use_local_models)
         except Exception as e:
             logger.exception('Failed to init input scanners: %s', e)
             self.input_scanners = []
 
     def _init_output_scanners(self):
-        """Initialize output scanners (no Guard() wrapper)."""
+        """Initialize output scanners using scan_prompt."""
         try:
-            # Create each scanner individually
+            # Create scanners as a simple list for use with scan function
             self.output_scanners = [
-                {
-                    'name': 'BanSubstrings',
-                    'scanner': OutputBanSubstrings(["malicious", "dangerous"]),
-                    'enabled': True
-                },
-                {
-                    'name': 'Toxicity',
-                    'scanner': OutputToxicity(
-                        threshold=0.5,
-                        model=TOXICITY_OUTPUT_MODEL if self.use_local_models else None
-                    ),
-                    'enabled': True
-                },
-                {
-                    'name': 'MaliciousURLs',
-                    'scanner': MaliciousURLs(),
-                    'enabled': True
-                },
-                {
-                    'name': 'NoRefusal',
-                    'scanner': NoRefusal(),
-                    'enabled': True
-                },
-                {
-                    'name': 'Code',
-                    'scanner': OutputCode(
-                        languages=code_language,
-                        is_blocked=True,
-                        model=OUTPUT_CODE_MODEL if self.use_local_models else None
-                    ),
-                    'enabled': True
-                },
+                OutputBanSubstrings(["malicious", "dangerous"]),
+                OutputToxicity(
+                    threshold=0.5,
+                    model=OUTPUT_TOXICITY_MODEL if self.use_local_models else None
+                ),
+                MaliciousURLs(),
+                NoRefusal(),
+                OutputCode(
+                    languages=code_language,
+                    is_blocked=True,
+                    model=OUTPUT_CODE_MODEL if self.use_local_models else None
+                ),
             ]
             
-            logger.info('Output scanners initialized: %d scanners ready (local_models: %s)', 
+            logger.info('Output scanners initialized: %d scanners ready for scan (local_models: %s)', 
                        len(self.output_scanners), self.use_local_models)
         except Exception as e:
             logger.exception('Failed to init output scanners: %s', e)
@@ -272,27 +248,24 @@ class LLMGuardManager:
 
     def _run_input_scanners(self, prompt: str) -> Tuple[str, bool, Dict[str, Any]]:
         """
-        Run all input scanners on the prompt.
+        Run all input scanners on the prompt using scan_prompt function.
         
-        Each scanner is called with scan(text) method.
         Returns (sanitized_text, is_valid, scan_results)
         """
-        sanitized_prompt = prompt
-        all_valid = True
-        scan_results = {}
+        if not self.input_scanners or not scan_prompt:
+            return prompt, True, {}
         
-        for scanner_info in self.input_scanners:
-            if not scanner_info['enabled']:
-                continue
-                
-            scanner_name = scanner_info['name']
-            scanner = scanner_info['scanner']
+        try:
+            # Use scan_prompt with input scanners
+            sanitized_prompt, results_valid, results_score = scan_prompt(
+                self.input_scanners,
+                prompt
+            )
             
-            try:
-                # Call scanner.scan() method directly
-                # Returns: (sanitized_output, is_valid, risk_score)
-                sanitized_prompt, is_valid, risk_score = scanner.scan(sanitized_prompt)
-                
+            # Convert results to expected format
+            scan_results = {}
+            for scanner_name, is_valid in results_valid.items():
+                risk_score = results_score.get(scanner_name, 0.0)
                 scan_results[scanner_name] = {
                     'passed': is_valid,
                     'risk_score': risk_score,
@@ -300,19 +273,14 @@ class LLMGuardManager:
                 }
                 
                 if not is_valid:
-                    all_valid = False
                     logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score}')
-                    
-            except Exception as e:
-                logger.exception(f'Error running input scanner {scanner_name}: %s', e)
-                scan_results[scanner_name] = {
-                    'passed': False,
-                    'error': str(e),
-                    'sanitized': False
-                }
-                all_valid = False
-        
-        return sanitized_prompt, all_valid, scan_results
+            
+            all_valid = all(results_valid.values())
+            return sanitized_prompt, all_valid, scan_results
+            
+        except Exception as e:
+            logger.exception('Error running input scanners with scan_prompt: %s', e)
+            return prompt, False, {'error': str(e)}
 
     def _run_output_scanners(self, text: str) -> Tuple[str, bool, Dict[str, Any]]:
         """
@@ -325,12 +293,8 @@ class LLMGuardManager:
         all_valid = True
         scan_results = {}
         
-        for scanner_info in self.output_scanners:
-            if not scanner_info['enabled']:
-                continue
-                
-            scanner_name = scanner_info['name']
-            scanner = scanner_info['scanner']
+        for scanner in self.output_scanners:
+            scanner_name = scanner.__class__.__name__
             
             try:
                 # Call scanner.scan() method directly
