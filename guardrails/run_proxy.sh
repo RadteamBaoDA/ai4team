@@ -65,6 +65,7 @@ CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
 PROXY_MODULE="ollama_guard_proxy:app"
 
 PROXY_MODULE="ollama_guard_proxy:app"
+LLM_GUARD_USE_LOCAL_MODELS="True"
 
 # Command to execute (start, stop, restart, status, logs, run)
 COMMAND="${1:-help}"
@@ -245,13 +246,14 @@ start_proxy() {
     export ENABLE_IP_FILTER=\"\${ENABLE_IP_FILTER:-}\"
     export IP_WHITELIST=\"\${IP_WHITELIST:-}\"
     export IP_BLACKLIST=\"\${IP_BLACKLIST:-}\"
-    
+    export LLM_GUARD_USE_LOCAL_MODELS=\"\${LLM_GUARD_USE_LOCAL_MODELS:false}\"
     echo '[START] Running uvicorn with config:'
     echo '[START]   Module: $PROXY_MODULE'
     echo '[START]   Host: $HOST'
     echo '[START]   Port: $PORT'
     echo '[START]   Workers: $WORKERS'
     echo '[START]   Log Level: $LOG_LEVEL'
+    echo '[START]   Using local model: $LLM_GUARD_USE_LOCAL_MODELS'
     echo ''
     
     uvicorn $PROXY_MODULE \\
@@ -344,6 +346,7 @@ status_proxy() {
     echo "  Ollama URL: $OLLAMA_URL"
     echo "  Nginx Whitelist: ${NGINX_WHITELIST:-empty (unrestricted)}"
     echo "  Log file: $LOG_FILE"
+    echo "  Using local mode: $LLM_GUARD_USE_LOCAL_MODELS"
     echo ""
     echo "Recent logs:"
     tail -5 "$LOG_FILE"
@@ -457,21 +460,22 @@ Examples:
   $0 run --reload --debug
 
 Environment Variables:
-  OLLAMA_URL               Ollama backend URL (e.g., http://127.0.0.1:11434)
-  PROXY_PORT               Proxy port
-  NGINX_WHITELIST          Comma-separated IPs/CIDR for Nginx-only access
-                           (e.g., "127.0.0.1,192.168.1.0/24")
-                           Empty = allow all, for local dev only
-  ENABLE_INPUT_GUARD       true/false
-  ENABLE_OUTPUT_GUARD      true/false
-  ENABLE_IP_FILTER         true/false
-  IP_WHITELIST             Comma-separated IPs
-  IP_BLACKLIST             Comma-separated IPs
-  CONFIG_FILE              Configuration file path
-  VENV_DIR                 Python virtual environment directory
-                           (default: ./venv)
-  USE_VENV                 true/false - Enable/disable venv activation
-                           (default: true)
+  OLLAMA_URL                 Ollama backend URL (e.g., http://127.0.0.1:11434)
+  PROXY_PORT                 Proxy port
+  NGINX_WHITELIST            Comma-separated IPs/CIDR for Nginx-only access
+                             (e.g., "127.0.0.1,192.168.1.0/24")
+                             Empty = allow all, for local dev only
+  ENABLE_INPUT_GUARD         true/false
+  ENABLE_OUTPUT_GUARD        true/false
+  ENABLE_IP_FILTER           true/false
+  IP_WHITELIST               Comma-separated IPs
+  IP_BLACKLIST               Comma-separated IPs
+  CONFIG_FILE                Configuration file path
+  VENV_DIR                   Python virtual environment directory
+                             (default: ./venv)
+  USE_VENV                   true/false - Enable/disable venv activation
+                             (default: true)
+  LLM_GUARD_USE_LOCAL_MODELS true/false - Enable/disable local models
 
 Log Files:
   All logs are written to: $LOG_DIR/proxy.log
@@ -714,6 +718,7 @@ run_interactive() {
   export ENABLE_IP_FILTER="${ENABLE_IP_FILTER:-}"
   export IP_WHITELIST="${IP_WHITELIST:-}"
   export IP_BLACKLIST="${IP_BLACKLIST:-}"
+  export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-}"
 
   # Build uvicorn command
   UVICORN_CMD="uvicorn $PROXY_MODULE"
@@ -757,6 +762,7 @@ run_interactive() {
   echo "║   ENABLE_INPUT_GUARD:      ${ENABLE_INPUT_GUARD:-not set}"
   echo "║   ENABLE_OUTPUT_GUARD:     ${ENABLE_OUTPUT_GUARD:-not set}"
   echo "║   ENABLE_IP_FILTER:        ${ENABLE_IP_FILTER:-not set}"
+  echo "║   LLM_GUARD_USE_LOCAL_MODELS:        ${LLM_GUARD_USE_LOCAL_MODELS:-not set}"
   echo "║"
   echo "║ Testing proxy:"
   echo "║   curl http://$HOST:$PORT/health"
