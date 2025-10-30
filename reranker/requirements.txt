@@ -1,5 +1,32 @@
+# Core dependencies
 fastapi>=0.110.0
-uvicorn>=0.30.0
+uvicorn[standard]>=0.30.0
 transformers>=4.40.0
 torch>=2.1.0
 pydantic>=2.6.0
+
+# Optional dependencies for enhanced performance
+# Uncomment if you need these optimizations:
+
+# For GPU acceleration (CUDA)
+# torch[audio,vision]>=2.1.0+cu118
+
+# For Apple Silicon (M-series Mac) optimization
+# mlx>=0.0.5
+# mlx-lm>=0.0.3
+
+# For faster tokenization
+# datasets>=2.14.0
+# tokenizers>=0.14.0
+
+# For monitoring and metrics
+# prometheus-client>=0.17.0
+
+# For distributed processing and caching
+# redis>=4.6.0  # Required for Redis distributed cache
+
+# For 8-bit quantization (GPU memory optimization)
+# bitsandbytes>=0.41.0  # Requires CUDA
+
+# For advanced caching
+# diskcache>=5.4.0
