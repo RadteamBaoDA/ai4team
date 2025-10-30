@@ -1,0 +1,197 @@
+version: '3.8'
+
+# Docker Compose configuration optimized for macOS with Apple Silicon
+# Includes performance tuning and resource limits suitable for M1/M2/M3 processors
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ollama-redis-macos
+    hostname: redis
+    platform: linux/arm64
+    ports:
+      - "127.0.0.1:6379:6379"  # Only accessible from localhost
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --loglevel warning
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - ollama_network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-macos
+    hostname: ollama
+    platform: linux/arm64
+    ports:
+      - "127.0.0.1:11434:11434"  # Only accessible from localhost
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_LOADED_MODELS=3
+      # Apple Silicon optimizations
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_DEBUG=false
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - ollama_network
+    # Resource limits optimized for Apple Silicon
+    deploy:
+      resources:
+        limits:
+          cpus: '6.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  ollama-guard-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.macos
+      platforms:
+        - linux/arm64
+    image: ollama-guard-proxy:macos-arm64
+    container_name: ollama-guard-proxy-macos
+    hostname: ollama-guard-proxy
+    platform: linux/arm64
+    ports:
+      - "8080:8080"  # Proxy API endpoint
+    environment:
+      # Ollama backend configuration
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_PATH=/api/generate
+      
+      # Proxy server configuration
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=8080
+      
+      # Guard features
+      - ENABLE_INPUT_GUARD=true
+      - ENABLE_OUTPUT_GUARD=true
+      - BLOCK_ON_GUARD_ERROR=false
+      
+      # IP filtering (disabled by default for local dev)
+      - ENABLE_IP_FILTER=false
+      - IP_WHITELIST=
+      - IP_BLACKLIST=
+      
+      # Configuration file
+      - CONFIG_FILE=/app/config.yaml
+      
+      # Redis cache configuration
+      - CACHE_ENABLED=true
+      - CACHE_BACKEND=redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_MAX_CONNECTIONS=50
+      - CACHE_TTL=3600
+      
+      # Local models configuration
+      - LLM_GUARD_USE_LOCAL_MODELS=false
+      - LLM_GUARD_MODELS_PATH=/app/models
+      - LLM_GUARD_DEVICE=cpu
+      
+      # Apple Silicon optimizations
+      - OMP_NUM_THREADS=8
+      - MKL_NUM_THREADS=8
+      - OPENBLAS_NUM_THREADS=8
+      - VECLIB_MAXIMUM_THREADS=8
+      
+      # Performance tuning
+      - PYTHONUNBUFFERED=1
+      - MALLOC_ARENA_MAX=2
+      
+      # Uvicorn configuration
+      - UVICORN_WORKERS=8
+      - UVICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
+      - UVICORN_LIMIT_CONCURRENCY=1000
+      - UVICORN_BACKLOG=2048
+      - UVICORN_TIMEOUT_KEEP_ALIVE=5
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
+      - ./models:/app/models:ro  # Mount local models if available
+      - proxy_cache:/app/cache
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ollama_network
+    # Resource limits for proxy service
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+volumes:
+  redis_data:
+    driver: local
+  ollama_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/ollama
+  proxy_cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./cache
+
+networks:
+  ollama_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

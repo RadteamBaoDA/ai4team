@@ -247,6 +247,20 @@ start_proxy() {
     export IP_WHITELIST=\"\${IP_WHITELIST:-}\"
     export IP_BLACKLIST=\"\${IP_BLACKLIST:-}\"
     export LLM_GUARD_USE_LOCAL_MODELS=\"\${LLM_GUARD_USE_LOCAL_MODELS:false}\"
+    
+    # Cache configuration
+    export CACHE_ENABLED=\"\${CACHE_ENABLED:-true}\"
+    export CACHE_BACKEND=\"\${CACHE_BACKEND:-auto}\"
+    export CACHE_TTL=\"\${CACHE_TTL:-3600}\"
+    export CACHE_MAX_SIZE=\"\${CACHE_MAX_SIZE:-1000}\"
+    
+    # Redis configuration
+    export REDIS_ENABLED=\"\${REDIS_ENABLED:-true}\"
+    export REDIS_HOST=\"\${REDIS_HOST:-localhost}\"
+    export REDIS_PORT=\"\${REDIS_PORT:-6379}\"
+    export REDIS_DB=\"\${REDIS_DB:-0}\"
+    export REDIS_PASSWORD=\"\${REDIS_PASSWORD:-}\"
+    export REDIS_MAX_CONNECTIONS=\"\${REDIS_MAX_CONNECTIONS:-50}\"
     echo '[START] Running uvicorn with config:'
     echo '[START]   Module: $PROXY_MODULE'
     echo '[START]   Host: $HOST'
@@ -700,7 +714,47 @@ run_interactive() {
   fi
   echo ""
   
-
+  # ======================================================================
+  # 4.5. CHECK REDIS CONNECTION
+  # ======================================================================
+  REDIS_ENABLED_VAL="${REDIS_ENABLED:-true}"
+  if [ "$REDIS_ENABLED_VAL" = "true" ]; then
+    echo "Step 4.5: Checking Redis Connection..."
+    echo "─────────────────────────────────────────────────────────────────"
+    
+    REDIS_HOST_VAL="${REDIS_HOST:-localhost}"
+    REDIS_PORT_VAL="${REDIS_PORT:-6379}"
+    REDIS_PASSWORD_VAL="${REDIS_PASSWORD:-}"
+    
+    if command -v redis-cli &> /dev/null; then
+      REDIS_CMD="redis-cli -h $REDIS_HOST_VAL -p $REDIS_PORT_VAL"
+      if [ -n "$REDIS_PASSWORD_VAL" ]; then
+        REDIS_CMD="$REDIS_CMD -a $REDIS_PASSWORD_VAL --no-auth-warning"
+      fi
+      
+      if $REDIS_CMD ping &>/dev/null; then
+        echo "✓ Redis connection OK ($REDIS_HOST_VAL:$REDIS_PORT_VAL)"
+        
+        # Get Redis info
+        REDIS_VERSION=$($REDIS_CMD INFO server 2>/dev/null | grep redis_version | cut -d':' -f2 | tr -d '\r')
+        REDIS_MEMORY=$($REDIS_CMD INFO memory 2>/dev/null | grep used_memory_human | cut -d':' -f2 | tr -d '\r')
+        
+        if [ -n "$REDIS_VERSION" ]; then
+          echo "  Redis version: $REDIS_VERSION"
+        fi
+        if [ -n "$REDIS_MEMORY" ]; then
+          echo "  Redis memory: $REDIS_MEMORY"
+        fi
+      else
+        echo "⚠ Warning: Cannot connect to Redis ($REDIS_HOST_VAL:$REDIS_PORT_VAL)"
+        echo "  Proxy will fall back to in-memory cache"
+      fi
+    else
+      echo "ℹ Info: redis-cli not installed, skipping Redis check"
+      echo "  Redis connection will be tested by the application"
+    fi
+    echo ""
+  fi
   
   # ======================================================================
   # 5. FINAL STARTUP DISPLAY
@@ -719,6 +773,20 @@ run_interactive() {
   export IP_WHITELIST="${IP_WHITELIST:-}"
   export IP_BLACKLIST="${IP_BLACKLIST:-}"
   export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-}"
+  
+  # Cache configuration
+  export CACHE_ENABLED="${CACHE_ENABLED:-true}"
+  export CACHE_BACKEND="${CACHE_BACKEND:-auto}"
+  export CACHE_TTL="${CACHE_TTL:-3600}"
+  export CACHE_MAX_SIZE="${CACHE_MAX_SIZE:-1000}"
+  
+  # Redis configuration
+  export REDIS_ENABLED="${REDIS_ENABLED:-true}"
+  export REDIS_HOST="${REDIS_HOST:-localhost}"
+  export REDIS_PORT="${REDIS_PORT:-6379}"
+  export REDIS_DB="${REDIS_DB:-0}"
+  export REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+  export REDIS_MAX_CONNECTIONS="${REDIS_MAX_CONNECTIONS:-50}"
 
   # Build uvicorn command
   UVICORN_CMD="uvicorn $PROXY_MODULE"

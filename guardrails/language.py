@@ -8,13 +8,14 @@ logger = logging.getLogger(__name__)
 class LanguageDetector:
     """Detect language from text and provide localized error messages."""
     LANGUAGE_PATTERNS = {
-        'zh': {'patterns': [r'[\u4e00-\u9fff]'], 'name': 'Chinese'},
-        'vi': {'patterns': [r'[\u0102\u0103\u0110\u0111\u0128\u0129\u0168\u0169\u01a0\u01a1\u01af\u01b0]'], 'name': 'Vietnamese'},
-        'ja': {'patterns': [r'[\u3040-\u309f\u30a0-\u30ff]'], 'name': 'Japanese'},
-        'ko': {'patterns': [r'[\uac00-\ud7af]'], 'name': 'Korean'},
-        'ru': {'patterns': [r'[\u0400-\u04ff]'], 'name': 'Russian'},
-        'ar': {'patterns': [r'[\u0600-\u06ff]'], 'name': 'Arabic'},
+        'zh': {'patterns': [re.compile(r'[\u4e00-\u9fff]')], 'name': 'Chinese'},
+        'vi': {'patterns': [re.compile(r'[\u0102\u0103\u0110\u0111\u0128\u0129\u0168\u0169\u01a0\u01a1\u01af\u01b0]')], 'name': 'Vietnamese'},
+        'ja': {'patterns': [re.compile(r'[\u3040-\u309f\u30a0-\u30ff]')], 'name': 'Japanese'},
+        'ko': {'patterns': [re.compile(r'[\uac00-\ud7af]')], 'name': 'Korean'},
+        'ru': {'patterns': [re.compile(r'[\u0400-\u04ff]')], 'name': 'Russian'},
+        'ar': {'patterns': [re.compile(r'[\u0600-\u06ff]')], 'name': 'Arabic'},
     }
+    ENGLISH_PATTERN = re.compile(r'\b(the|a|an|and|or|is|are|was|were|be|have|has|had)\b', re.IGNORECASE)
 
     ERROR_MESSAGES: Dict[str, Dict[str, str]] = {
         'en': {
@@ -33,10 +34,10 @@ class LanguageDetector:
             return 'en'
         for lang_code, lang_info in LanguageDetector.LANGUAGE_PATTERNS.items():
             for pattern in lang_info['patterns']:
-                if re.search(pattern, text):
+                if pattern.search(text):
                     logger.info("Detected language: %s", lang_info['name'])
                     return lang_code
-        if re.search(r'\b(the|a|an|and|or|is|are|was|were|be|have|has|had)\b', text, re.IGNORECASE):
+        if LanguageDetector.ENGLISH_PATTERN.search(text):
             return 'en'
         return 'en'
 

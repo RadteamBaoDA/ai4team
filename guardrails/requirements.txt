@@ -1,5 +1,35 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-requests==2.31.0
-pydantic==2.5.0
+# Core web framework and ASGI server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# HTTP client
+httpx==0.26.0
+
+# Security and guardrails
 llm-guard==0.3.16
+
+# YAML configuration
+pyyaml==6.0.1
+
+# Performance optimizations
+orjson==3.9.12  # Fast JSON serialization
+uvloop==0.19.0  # Fast event loop (Unix only)
+
+# Caching and performance
+cachetools==5.3.2
+redis[async]==5.0.1  # Redis client for distributed caching
+hiredis==2.3.2  # C parser for Redis (performance boost)
+
+# Security
+cryptography==42.0.0
+
+# Monitoring and metrics
+prometheus-client==0.19.0
+psutil==5.9.7  # System and process monitoring
+
+# Python optimizations for Apple Silicon
+# These will use pre-built wheels when available on ARM64
+numpy==1.26.3
+torch==2.1.2  # Compatible with MPS on macOS

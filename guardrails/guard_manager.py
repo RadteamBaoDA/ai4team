@@ -1,9 +1,21 @@
 import logging
 import os
+import platform
 from typing import Dict, Any, List, Tuple
+
+from fastapi.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 code_language = ['Python', 'C#', 'C++', 'C']
+
+# Check for PyTorch availability and device support
+try:
+    import torch
+    HAS_TORCH = True
+    logger.info(f'PyTorch {torch.__version__} detected')
+except ImportError:
+    HAS_TORCH = False
+    logger.warning('PyTorch not available')
 
 # Direct imports from llm-guard
 try:
@@ -68,6 +80,10 @@ class LLMGuardManager:
         self.enable_output = enable_output and HAS_LLM_GUARD
         self.enable_anonymize = enable_anonymize and HAS_LLM_GUARD
         
+        # Detect and configure compute device
+        self.device = self._detect_device()
+        logger.info(f'Using compute device: {self.device}')
+        
         # Check if local models should be used
         self.use_local_models = self._check_local_models_config()
         
@@ -97,6 +113,75 @@ class LLMGuardManager:
         if self.enable_output:
             self._init_output_scanners()
 
+    def _detect_device(self) -> str:
+        """
+        Detect the best available compute device for ML models.
+        
+        Priority order:
+        1. MPS (Apple Silicon GPU) - macOS with Apple Silicon
+        2. CUDA (NVIDIA GPU) - Linux/Windows with NVIDIA GPU
+        3. CPU - Fallback for all platforms
+        
+        Returns:
+            Device string: 'mps', 'cuda', or 'cpu'
+        """
+        if not HAS_TORCH:
+            logger.info('PyTorch not available, using CPU for computations')
+            return 'cpu'
+        
+        # Check for explicit device override
+        device_override = os.environ.get('LLM_GUARD_DEVICE', '').lower()
+        if device_override in ('mps', 'cuda', 'cpu'):
+            if device_override == 'mps' and torch.backends.mps.is_available():
+                logger.info('MPS device explicitly set and available')
+                return 'mps'
+            elif device_override == 'cuda' and torch.cuda.is_available():
+                logger.info('CUDA device explicitly set and available')
+                return 'cuda'
+            elif device_override == 'cpu':
+                logger.info('CPU device explicitly set')
+                return 'cpu'
+            else:
+                logger.warning(f'Device override "{device_override}" not available, using auto-detection')
+        
+        # Auto-detect best available device
+        # Priority 1: Apple Silicon MPS (Metal Performance Shaders)
+        if torch.backends.mps.is_available():
+            system = platform.system()
+            machine = platform.machine()
+            logger.info(f'MPS (Apple Silicon GPU) detected - System: {system}, Machine: {machine}')
+            
+            # Verify MPS is actually functional
+            try:
+                test_tensor = torch.zeros(1, device='mps')
+                del test_tensor
+                logger.info('MPS device verified and functional')
+                return 'mps'
+            except Exception as e:
+                logger.warning(f'MPS available but not functional: {e}, falling back to CPU')
+        
+        # Priority 2: NVIDIA CUDA
+        if torch.cuda.is_available():
+            device_count = torch.cuda.device_count()
+            device_name = torch.cuda.get_device_name(0) if device_count > 0 else 'Unknown'
+            logger.info(f'CUDA GPU detected - Device: {device_name}, Count: {device_count}')
+            return 'cuda'
+        
+        # Priority 3: CPU fallback
+        cpu_count = os.cpu_count() or 1
+        logger.info(f'Using CPU with {cpu_count} cores')
+        
+        # Enable CPU optimizations if available
+        if HAS_TORCH:
+            try:
+                # Enable MKL-DNN optimizations for Intel CPUs
+                torch.set_num_threads(cpu_count)
+                logger.info(f'CPU optimizations enabled: {cpu_count} threads')
+            except Exception as e:
+                logger.debug(f'Could not set CPU optimizations: {e}')
+        
+        return 'cpu'
+    
     def _check_local_models_config(self) -> bool:
         """Check if local models should be used based on environment variables."""
         use_local = os.environ.get('LLM_GUARD_USE_LOCAL_MODELS', '').lower() in ('1', 'true', 'yes', 'on')
@@ -105,7 +190,7 @@ class LLMGuardManager:
         return use_local
 
     def _configure_local_models(self):
-        """Configure model paths and settings for local model usage."""
+        """Configure model paths and settings for local model usage with device optimization."""
         if not HAS_LLM_GUARD:
             return
             
@@ -113,9 +198,40 @@ class LLMGuardManager:
             # Get base path for local models
             models_base_path = os.environ.get('LLM_GUARD_MODELS_PATH', './models')
             
+            # Device-specific optimizations
+            device_kwargs = {}
+            if HAS_TORCH:
+                device_kwargs['device'] = self.device
+                
+                # MPS-specific optimizations for Apple Silicon
+                if self.device == 'mps':
+                    logger.info('Applying MPS optimizations for Apple Silicon')
+                    device_kwargs['device_map'] = None  # MPS doesn't support device_map
+                    # Enable reduced precision for faster inference on Apple Silicon
+                    if os.environ.get('MPS_ENABLE_FP16', 'true').lower() in ('1', 'true', 'yes', 'on'):
+                        device_kwargs['torch_dtype'] = torch.float16
+                        logger.info('Enabled FP16 (half precision) for MPS')
+                
+                # CUDA-specific optimizations
+                elif self.device == 'cuda':
+                    logger.info('Applying CUDA optimizations')
+                    device_kwargs['device_map'] = 'auto'
+                    # Enable TensorFloat32 for better performance on Ampere+ GPUs
+                    if torch.cuda.get_device_capability()[0] >= 8:
+                        torch.backends.cuda.matmul.allow_tf32 = True
+                        torch.backends.cudnn.allow_tf32 = True
+                        logger.info('Enabled TF32 for CUDA')
+                
+                # CPU-specific optimizations
+                else:
+                    logger.info('Applying CPU optimizations')
+                    # Enable JIT compilation for CPU
+                    device_kwargs['torchscript'] = True
+            
             # Configure Prompt Injection model
             if PROMPT_INJECTION_MODEL:
                 PROMPT_INJECTION_MODEL.kwargs["local_files_only"] = True
+                PROMPT_INJECTION_MODEL.kwargs.update(device_kwargs)
                 PROMPT_INJECTION_MODEL.path = os.path.join(models_base_path, "deberta-v3-base-prompt-injection-v2")
                 logger.info(f'Configured PromptInjection model path: {PROMPT_INJECTION_MODEL.path}')
             
@@ -123,33 +239,38 @@ class LLMGuardManager:
             if DEBERTA_AI4PRIVACY_v2_CONF and "DEFAULT_MODEL" in DEBERTA_AI4PRIVACY_v2_CONF:
                 DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path = os.path.join(models_base_path, "deberta-v3-base_finetuned_ai4privacy_v2")
                 DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].kwargs["local_files_only"] = True
+                DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].kwargs.update(device_kwargs)
                 logger.info(f'Configured Anonymize model path: {DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path}')
             
             # Configure Input Toxicity model
             if INPUT_TOXICITY_MODEL:
                 INPUT_TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
                 INPUT_TOXICITY_MODEL.kwargs["local_files_only"] = True
+                INPUT_TOXICITY_MODEL.kwargs.update(device_kwargs)
                 logger.info(f'Configured input Toxicity model path: {INPUT_TOXICITY_MODEL.path}')
             
             # Configure Output Toxicity model
             if OUTPUT_TOXICITY_MODEL:
                 OUTPUT_TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
                 OUTPUT_TOXICITY_MODEL.kwargs["local_files_only"] = True
+                OUTPUT_TOXICITY_MODEL.kwargs.update(device_kwargs)
                 logger.info(f'Configured output Toxicity model path: {OUTPUT_TOXICITY_MODEL.path}')
             
             # Configure Input Code model
             if INPUT_CODE_MODEL:
                 INPUT_CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
                 INPUT_CODE_MODEL.kwargs["local_files_only"] = True
+                INPUT_CODE_MODEL.kwargs.update(device_kwargs)
                 logger.info(f'Configured input Code model path: {INPUT_CODE_MODEL.path}')
             
             # Configure Output Code model
             if OUTPUT_CODE_MODEL:
                 OUTPUT_CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
                 OUTPUT_CODE_MODEL.kwargs["local_files_only"] = True
+                OUTPUT_CODE_MODEL.kwargs.update(device_kwargs)
                 logger.info(f'Configured output Code model path: {OUTPUT_CODE_MODEL.path}')
             
-            logger.info('Local model configuration completed')
+            logger.info(f'Local model configuration completed for device: {self.device}')
             
         except Exception as e:
             logger.exception('Failed to configure local models: %s', e)
@@ -246,7 +367,7 @@ class LLMGuardManager:
             logger.exception('Failed to init output scanners: %s', e)
             self.output_scanners = []
 
-    def _run_input_scanners(self, prompt: str) -> Tuple[str, bool, Dict[str, Any]]:
+    async def _run_input_scanners(self, prompt: str) -> Tuple[str, bool, Dict[str, Any]]:
         """
         Run all input scanners on the prompt using scan_prompt function.
         
@@ -256,8 +377,9 @@ class LLMGuardManager:
             return prompt, True, {}
         
         try:
-            # Use scan_prompt with input scanners
-            sanitized_prompt, results_valid, results_score = scan_prompt(
+            # Use scan_prompt with input scanners in a thread pool
+            sanitized_prompt, results_valid, results_score = await run_in_threadpool(
+                scan_prompt,
                 self.input_scanners,
                 prompt
             )
@@ -282,47 +404,50 @@ class LLMGuardManager:
             logger.exception('Error running input scanners with scan_prompt: %s', e)
             return prompt, False, {'error': str(e)}
 
-    def _run_output_scanners(self, text: str) -> Tuple[str, bool, Dict[str, Any]]:
+    async def _run_output_scanners(self, text: str) -> Tuple[str, bool, Dict[str, Any]]:
         """
-        Run all output scanners on the text.
+        Run all output scanners on the text in a thread pool.
         
         Each scanner is called with scan(text) method.
         Returns (sanitized_text, is_valid, scan_results)
         """
-        sanitized_text = text
-        all_valid = True
-        scan_results = {}
         
-        for scanner in self.output_scanners:
-            scanner_name = scanner.__class__.__name__
+        def sync_scan():
+            sanitized_text = text
+            all_valid = True
+            scan_results = {}
             
-            try:
-                # Call scanner.scan() method directly
-                # Returns: (sanitized_output, is_valid, risk_score)
-                sanitized_text, is_valid, risk_score = scanner.scan(sanitized_text)
+            for scanner in self.output_scanners:
+                scanner_name = scanner.__class__.__name__
                 
-                scan_results[scanner_name] = {
-                    'passed': is_valid,
-                    'risk_score': risk_score,
-                    'sanitized': sanitized_text != text
-                }
-                
-                if not is_valid:
-                    all_valid = False
-                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score}')
+                try:
+                    # Call scanner.scan() method directly
+                    sanitized_text, is_valid, risk_score = scanner.scan(sanitized_text)
                     
-            except Exception as e:
-                logger.exception(f'Error running output scanner {scanner_name}: %s', e)
-                scan_results[scanner_name] = {
-                    'passed': False,
-                    'error': str(e),
-                    'sanitized': False
-                }
-                all_valid = False
-        
-        return sanitized_text, all_valid, scan_results
+                    scan_results[scanner_name] = {
+                        'passed': is_valid,
+                        'risk_score': risk_score,
+                        'sanitized': sanitized_text != text
+                    }
+                    
+                    if not is_valid:
+                        all_valid = False
+                        logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score}')
+                        
+                except Exception as e:
+                    logger.exception(f'Error running output scanner {scanner_name}: %s', e)
+                    scan_results[scanner_name] = {
+                        'passed': False,
+                        'error': str(e),
+                        'sanitized': False
+                    }
+                    all_valid = False
+            
+            return sanitized_text, all_valid, scan_results
 
-    def scan_input(self, prompt: str, block_on_error: bool = False) -> Dict[str, Any]:
+        return await run_in_threadpool(sync_scan)
+
+    async def scan_input(self, prompt: str, block_on_error: bool = False) -> Dict[str, Any]:
         """
         Scan input prompt using all input scanners.
         
@@ -343,7 +468,7 @@ class LLMGuardManager:
             }
         
         try:
-            sanitized_prompt, is_valid, scan_results = self._run_input_scanners(prompt)
+            sanitized_prompt, is_valid, scan_results = await self._run_input_scanners(prompt)
             
             return {
                 "allowed": is_valid,
@@ -367,7 +492,7 @@ class LLMGuardManager:
                 "scanners": {}
             }
 
-    def scan_output(self, text: str, block_on_error: bool = False) -> Dict[str, Any]:
+    async def scan_output(self, text: str, block_on_error: bool = False) -> Dict[str, Any]:
         """
         Scan output text using all output scanners.
         
@@ -388,7 +513,7 @@ class LLMGuardManager:
             }
         
         try:
-            sanitized_text, is_valid, scan_results = self._run_output_scanners(text)
+            sanitized_text, is_valid, scan_results = await self._run_output_scanners(text)
             
             return {
                 "allowed": is_valid,

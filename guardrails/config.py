@@ -1,56 +1,112 @@
 import os
 import yaml
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Union
 import logging
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
 
 class Config:
-    """Simple configuration loader used by the proxy.
+    """A flexible configuration loader for the proxy.
 
-    Prefers environment variables, then YAML file values, then defaults.
+    It retrieves settings with the following priority:
+    1. Environment variables (e.g., `OLLAMA_URL`).
+    2. Values from a YAML configuration file.
+    3. Default values specified in the code.
+
+    The `get` method is cached to ensure fast access to configuration values
+    during runtime.
     """
 
     def __init__(self, config_file: Optional[str] = None):
-        self._raw: Dict[str, Any] = {}
+        self._config_data: Dict[str, Any] = {}
+        self._env_data: Dict[str, Any] = {}
         self._load(config_file)
 
     def _load(self, config_file: Optional[str] = None) -> None:
-        data = {}
+        """Load configurations from file and environment."""
         if config_file and os.path.exists(config_file):
-            with open(config_file, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or {}
-
-        def env_or(key: str, default: Any):
-            return os.environ.get(key, data.get(key, default))
-
-        self._raw['ollama_url'] = env_or('OLLAMA_URL', 'http://127.0.0.1:11434')
-        self._raw['ollama_path'] = env_or('OLLAMA_PATH', '/api/generate')
-        self._raw['proxy_port'] = int(env_or('PROXY_PORT', data.get('proxy_port', 8080)))
-        self._raw['proxy_host'] = env_or('PROXY_HOST', data.get('proxy_host', '0.0.0.0'))
-
-        def bool_env(key: str, default: bool) -> bool:
-            val = os.environ.get(key)
-            if val is None:
-                return bool(data.get(key, default))
-            return str(val).lower() in ('1', 'true', 'yes', 'on')
-
-        self._raw['enable_input_guard'] = bool_env('ENABLE_INPUT_GUARD', True)
-        self._raw['enable_output_guard'] = bool_env('ENABLE_OUTPUT_GUARD', True)
-        self._raw['block_on_guard_error'] = bool_env('BLOCK_ON_GUARD_ERROR', False)
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    self._config_data = yaml.safe_load(f) or {}
+                logger.info(f"Successfully loaded configuration from {config_file}")
+            except (IOError, yaml.YAMLError) as e:
+                logger.error(f"Failed to load or parse config file {config_file}: {e}")
         
-        # Local models configuration
-        self._raw['use_local_models'] = bool_env('LLM_GUARD_USE_LOCAL_MODELS', False)
-        self._raw['models_path'] = env_or('LLM_GUARD_MODELS_PATH', data.get('models_path', './models'))
+        # Store relevant environment variables
+        self._env_data = {k: v for k, v in os.environ.items() if k.isupper()}
 
-        nginx_env = os.environ.get('NGINX_WHITELIST')
-        if nginx_env:
-            self._raw['nginx_whitelist'] = [ip.strip() for ip in nginx_env.split(',') if ip.strip()]
-        else:
-            self._raw['nginx_whitelist'] = data.get('nginx_whitelist', []) or []
+        logger.info('Configuration loaded. Access via get() method.')
 
-        logger.info('Configuration loaded')
-
+    @lru_cache(maxsize=128)
     def get(self, key: str, default: Any = None) -> Any:
-        return self._raw.get(key, default)
+        """
+        Retrieve a configuration value.
+
+        Args:
+            key: The configuration key (e.g., 'ollama_url').
+            default: The default value to return if the key is not found.
+
+        Returns:
+            The configuration value.
+        """
+        env_key = key.upper()
+        
+        # 1. Check environment variables first
+        if env_key in self._env_data:
+            value = self._env_data[env_key]
+            # Attempt to convert to the same type as the default
+            if default is not None:
+                return self._cast_to_default_type(value, default)
+            return value
+
+        # 2. Check YAML file data
+        if key in self._config_data:
+            return self._config_data[key]
+
+        # 3. Return default
+        return default
+
+    def _cast_to_default_type(self, value: str, default: Any) -> Any:
+        """Attempt to cast a string value to the type of the default value."""
+        caster = type(default)
+        try:
+            if caster == bool:
+                return str(value).lower() in ('1', 'true', 'yes', 'on')
+            if caster == list:
+                # Handle comma-separated lists from env vars
+                return [item.strip() for item in value.split(',') if item.strip()]
+            return caster(value)
+        except (ValueError, TypeError):
+            logger.warning(
+                f"Could not cast env var value '{value}' to type {caster.__name__}. "
+                f"Returning as string."
+            )
+            return value
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        """Helper to get a boolean value."""
+        return self.get(key, default)
+
+    def get_int(self, key: str, default: int = 0) -> int:
+        """Helper to get an integer value."""
+        return self.get(key, default)
+
+    def get_str(self, key: str, default: str = "") -> str:
+        """Helper to get a string value."""
+        return self.get(key, default)
+
+    def get_list(self, key: str, default: Optional[List[str]] = None) -> List[str]:
+        """Helper to get a list value."""
+        return self.get(key, default or [])
+
+# Example of how the new Config class would be used in ollama_guard_proxy.py
+# This is for demonstration and should not be run directly.
+def _demonstrate_usage():
+    # In the main application:
+    # config = Config(os.environ.get('CONFIG_FILE'))
+    # port = config.get_int('proxy_port', 8080)
+    # is_enabled = config.get_bool('enable_input_guard', True)
+    # whitelist = config.get_list('nginx_whitelist', [])
+    pass
