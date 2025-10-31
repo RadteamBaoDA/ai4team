@@ -410,11 +410,12 @@ class LLMGuardManager:
             logger.exception('Error running input scanners with scan_prompt: %s', e)
             return prompt, False, {'error': str(e)}
 
-    async def _run_output_scanners(self, text: str) -> Tuple[str, bool, Dict[str, Any]]:
+    async def _run_output_scanners(self, text: str, prompt: str = "") -> Tuple[str, bool, Dict[str, Any]]:
         """
         Run all output scanners on the text in a thread pool.
         
-        Each scanner is called with scan(text) method.
+        Output scanners require both prompt and output text.
+        Each scanner is called with scan(prompt, output) method.
         Returns (sanitized_text, is_valid, scan_results)
         """
         
@@ -427,8 +428,9 @@ class LLMGuardManager:
                 scanner_name = scanner.__class__.__name__
                 
                 try:
-                    # Call scanner.scan() method directly
-                    sanitized_text, is_valid, risk_score = scanner.scan(sanitized_text)
+                    # Output scanners require scan(prompt, output) signature
+                    # If no prompt provided, use empty string
+                    sanitized_text, is_valid, risk_score = scanner.scan(prompt, sanitized_text)
                     
                     scan_results[scanner_name] = {
                         'passed': is_valid,
@@ -502,9 +504,14 @@ class LLMGuardManager:
                 "scanners": {}
             }
 
-    async def scan_output(self, text: str, block_on_error: bool = False) -> Dict[str, Any]:
+    async def scan_output(self, text: str, prompt: str = "", block_on_error: bool = False) -> Dict[str, Any]:
         """
         Scan output text using all output scanners.
+        
+        Args:
+            text: The output text to scan
+            prompt: The original input prompt (optional, but recommended for context)
+            block_on_error: Whether to block on scanner errors
         
         Returns:
             {
@@ -527,7 +534,7 @@ class LLMGuardManager:
             }
         
         try:
-            sanitized_text, is_valid, scan_results = await self._run_output_scanners(text)
+            sanitized_text, is_valid, scan_results = await self._run_output_scanners(text, prompt)
             
             return {
                 "allowed": is_valid,
