@@ -119,7 +119,10 @@ run_server() {
         source "$VENV_ACTIVATE"
     fi
 
-    # Build uvicorn command
+    # Export all variables first (before building command)
+    export_variables
+
+    # Build uvicorn command with properly set variables
     UVICORN_CMD="uvicorn $PROXY_MODULE"
     UVICORN_CMD="$UVICORN_CMD --host $HOST"
     UVICORN_CMD="$UVICORN_CMD --port $PORT"
@@ -133,8 +136,7 @@ run_server() {
 
     echo "[START] Running command: $UVICORN_CMD"
     
-    # Export all variables and execute
-    export_variables
+    # Execute the command
     exec $UVICORN_CMD
 }
 
@@ -155,8 +157,34 @@ start_proxy() {
   # Create log directory if it doesn't exist
   mkdir -p "$LOG_DIR"
   
-  # Run the server in the background
-  nohup bash -c "$(declare -f export_variables run_server); run_server" > "$LOG_FILE" 2>&1 &
+  # Export variables for the background process
+  export_variables
+  
+  # Run the server in the background with all necessary variables
+  nohup bash -c "
+    export PROJECT_ROOT='$PROJECT_ROOT'
+    export HOST='$HOST'
+    export PORT='$PORT'
+    export LOG_LEVEL='$LOG_LEVEL'
+    export RELOAD='$RELOAD'
+    export PROXY_MODULE='$PROXY_MODULE'
+    export VENV_DIR='$VENV_DIR'
+    export VENV_ACTIVATE='$VENV_ACTIVATE'
+    export USE_VENV='$USE_VENV'
+    export CONFIG_FILE='$CONFIG_FILE'
+    export PYTHONPATH='$PROJECT_ROOT'
+    
+    # Activate virtual environment if enabled
+    if [ \"\$USE_VENV\" = \"true\" ] && [ -f \"\$VENV_ACTIVATE\" ]; then
+        source \"\$VENV_ACTIVATE\"
+    fi
+    
+    # Change to project root
+    cd \"\$PROJECT_ROOT\"
+    
+    # Run uvicorn
+    exec uvicorn \"\$PROXY_MODULE\" --host \"\$HOST\" --port \"\$PORT\" --log-level \"\$LOG_LEVEL\" --forwarded-allow-ips='*'
+  " > "$LOG_FILE" 2>&1 &
   
   local pid=$!
   echo "$pid" > "$PID_FILE"
