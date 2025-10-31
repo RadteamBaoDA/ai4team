@@ -94,7 +94,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                     error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
                     
                     raise HTTPException(
-                        status_code=403,
+                        status_code=451,
                         detail=error_message,
                         headers={
                             "X-Error-Type": "content_policy_violation",
@@ -282,7 +282,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                     )
                     
                     raise HTTPException(
-                        status_code=403,
+                        status_code=451,
                         detail=error_message,
                         headers={
                             "X-Error-Type": "content_policy_violation",
