@@ -8,11 +8,11 @@ import os
 import time
 from typing import List, Optional, Tuple
 
-from .config import RerankerConfig
-from .enhanced_concurrency import ConcurrencyMetrics, OptimizedConcurrencyController, QueueFullError, QueueTimeoutError
-from .unified_reranker import UnifiedReRanker
-from .distributed_cache import get_redis_cache
-from .micro_batcher import create_micro_batcher
+from ..core.config import RerankerConfig
+from ..core.concurrency import ConcurrencyMetrics, OptimizedConcurrencyController, QueueFullError, QueueTimeoutError
+from ..core.unified_reranker import UnifiedReRanker
+from ..utils.distributed_cache import get_redis_cache
+from ..utils.micro_batcher import create_micro_batcher
 
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
@@ -120,21 +120,28 @@ async def clear_cache_periodically():
             logger.info("Periodic cache clear completed")
 
 
-# Start background tasks
-if ENABLE_CACHE:
-    asyncio.create_task(clear_cache_periodically())
+# Background tasks will be started during app startup
+_background_tasks_started = False
 
-# Optional model warmup to reduce first-request latency
-if os.environ.get("WARMUP_ON_START", "true").lower() == "true":
-    try:
-        # Run warmup in a thread to avoid blocking event loop at import time
-        asyncio.get_event_loop().run_in_executor(None, reranker.warmup)
-    except Exception:
-        # In some contexts event loop may not be ready; schedule after startup
-        async def _delayed_warmup():
-            await asyncio.sleep(0.1)
-            reranker.warmup()
-        asyncio.create_task(_delayed_warmup())
+async def start_background_tasks():
+    """Start background tasks - called during app startup."""
+    global _background_tasks_started
+    if _background_tasks_started:
+        return
+        
+    if ENABLE_CACHE:
+        asyncio.create_task(clear_cache_periodically())
+    
+    # Optional model warmup to reduce first-request latency
+    if os.environ.get("WARMUP_ON_START", "true").lower() == "true":
+        try:
+            # Run warmup in a thread to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, reranker.warmup)
+        except Exception as exc:
+            logger.warning("Warmup failed: %s", exc)
+    
+    _background_tasks_started = True
 
 
 async def get_service_stats():
@@ -187,6 +194,7 @@ __all__ = [
     "reranker",
     "rerank_with_queue",
     "get_service_stats",
+    "start_background_tasks",
     "QueueFullError",
     "QueueTimeoutError",
 ]

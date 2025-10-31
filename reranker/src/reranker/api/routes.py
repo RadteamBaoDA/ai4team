@@ -9,9 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
-from .normalization import normalize_documents
-from .schemas import RerankRequest, RerankResponse
-from .service import (
+from ..utils.normalization import normalize_documents
+from ..models.schemas import RerankRequest, RerankResponse
+from ..services.reranker_service import (
     QueueFullError,
     QueueTimeoutError,
     config,

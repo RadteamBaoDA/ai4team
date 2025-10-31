@@ -1,4 +1,4 @@
-"""Application factory for the reranker service."""
+"""FastAPI application factory for the reranker service."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI
 
 from .routes import router
-from .service import config, controller, get_service_stats, reranker
+from ..services.reranker_service import config, controller, get_service_stats, reranker, start_background_tasks
 
 logger = logging.getLogger("reranker")
 
@@ -43,8 +43,9 @@ async def metrics_endpoint() -> dict:
     return await get_service_stats()
 
 
-@app.lifespan("startup")
+@app.on_event("startup")
 async def on_startup() -> None:
+    await start_background_tasks()
     logger.info(
         "Loaded optimized reranker model %s (%s) on %s (max_parallel=%s max_queue=%s)",
         config.model_name,
