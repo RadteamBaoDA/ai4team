@@ -18,7 +18,7 @@ import httpx
 from .language import LanguageDetector
 
 logger = logging.getLogger(__name__)
-
+min_output_length = 50
 
 async def stream_response_with_guard(response: httpx.Response, guard_manager, config, detected_lang: str = 'en'):
     """Stream response with output scanning.
@@ -56,8 +56,8 @@ async def stream_response_with_guard(response: httpx.Response, guard_manager, co
                 if content:
                     accumulated_text += content
             
-            # Scan accumulated text periodically (every 500 chars)
-            if len(accumulated_text) > 500 and config.get('enable_output_guard', True):
+            # Scan accumulated text periodically (every min_output_length chars)
+            if len(accumulated_text) > min_output_length and config.get('enable_output_guard', True):
                 output_result = await guard_manager.scan_output(accumulated_text)
                 if not output_result['allowed']:
                     logger.warning(f"Streaming output blocked by LLM Guard: {output_result}")
@@ -201,7 +201,7 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
                 total_text += delta_text
                 scan_buffer += delta_text
 
-                if config.get('enable_output_guard', True) and len(scan_buffer) >= 500:
+                if config.get('enable_output_guard', True) and len(scan_buffer) >= min_output_length:
                     scan_result = await guard_manager.scan_output(scan_buffer, block_on_error=block_on_error)
                     if not scan_result.get('allowed', True):
                         logger.warning("Streaming OpenAI output blocked by LLM Guard: %s", scan_result)
@@ -269,7 +269,7 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
                 }
                 usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
 
-                remaining_text = scan_buffer or (total_text if len(total_text) <= 500 else "")
+                remaining_text = scan_buffer or (total_text if len(total_text) <= min_output_length else "")
                 if config.get('enable_output_guard', True) and remaining_text:
                     scan_result = await guard_manager.scan_output(remaining_text, block_on_error=block_on_error)
                     if not scan_result.get('allowed', True):
@@ -409,7 +409,7 @@ async def stream_openai_completion_response(response: httpx.Response, guard_mana
                 total_text += delta_text
                 scan_buffer += delta_text
 
-                if config.get('enable_output_guard', True) and len(scan_buffer) >= 500:
+                if config.get('enable_output_guard', True) and len(scan_buffer) >= min_output_length:
                     scan_result = await guard_manager.scan_output(scan_buffer, block_on_error=block_on_error)
                     if not scan_result.get('allowed', True):
                         logger.warning("Streaming completion output blocked: %s", scan_result)
@@ -462,7 +462,7 @@ async def stream_openai_completion_response(response: httpx.Response, guard_mana
                 }
                 usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
 
-                remaining_text = scan_buffer or (total_text if len(total_text) <= 500 else "")
+                remaining_text = scan_buffer or (total_text if len(total_text) <= min_output_length else "")
                 if config.get('enable_output_guard', True) and remaining_text:
                     scan_result = await guard_manager.scan_output(remaining_text, block_on_error=block_on_error)
                     if not scan_result.get('allowed', True):

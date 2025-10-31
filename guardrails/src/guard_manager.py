@@ -1,9 +1,8 @@
 import logging
 import os
 import platform
+import asyncio
 from typing import Dict, Any, List, Tuple
-
-from fastapi.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 code_language = ['Python', 'C#', 'C++', 'C']
@@ -385,8 +384,8 @@ class LLMGuardManager:
             return prompt, True, {}
         
         try:
-            # Use scan_prompt with input scanners in a thread pool
-            sanitized_prompt, results_valid, results_score = await run_in_threadpool(
+            # Use scan_prompt with input scanners in a thread (llm-guard best practice)
+            sanitized_prompt, results_valid, results_score = await asyncio.to_thread(
                 scan_prompt,
                 self.input_scanners,
                 prompt,
@@ -425,9 +424,9 @@ class LLMGuardManager:
             return text, True, {}
         
         try:
-            # Use scan_output with output scanners in a thread pool
+            # Use scan_output with output scanners in a thread (llm-guard best practice)
             # Signature: scan_output(scanners, prompt, output, fail_fast)
-            sanitized_output, results_valid, results_score = await run_in_threadpool(
+            sanitized_output, results_valid, results_score = await asyncio.to_thread(
                 scan_output,
                 self.output_scanners,
                 prompt,
