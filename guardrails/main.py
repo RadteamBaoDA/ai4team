@@ -1,37 +1,29 @@
 """
-Ollama Guard Proxy - Entry Point
+Ollama Guardrails - Entry Point
 
-This is the main entry point for the Ollama Guard Proxy application.
-All source code is in the src/ directory.
+This is the main entry point for the Ollama Guardrails application.
+The application code is now organized as a proper Python package in src/ollama_guardrails/.
 
 Usage:
     python main.py
     
+Or with the CLI:
+    python -m ollama_guardrails server
+    
 Or with Uvicorn:
-    uvicorn src.ollama_guard_proxy:app --host 0.0.0.0 --port 8080
+    uvicorn src.ollama_guardrails.app:app --host 0.0.0.0 --port 8080
+
+For installed package:
+    ollama-guardrails server
 """
 
 import sys
 import os
 
-# Add src directory to Python path
+# Add src directory to Python path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 # Import and run the main application
 if __name__ == "__main__":
-    from src.ollama_guard_proxy import app, config, logger
-    import uvicorn
-    
-    host = config.get('proxy_host', '0.0.0.0')
-    port = config.get('proxy_port', 8080)
-    
-    logger.info(f"Starting Ollama Guard Proxy on {host}:{port}")
-    logger.info(f"Forwarding to Ollama at {config.get('ollama_url')}")
-    logger.info("=" * 60)
-    logger.info("Available Endpoints:")
-    logger.info("  Ollama API: /api/* (12 endpoints)")
-    logger.info("  OpenAI API: /v1/* (4 endpoints)")
-    logger.info("  Admin API: /health, /config, /stats, /admin/*, /queue/*")
-    logger.info("=" * 60)
-    
-    uvicorn.run(app, host=host, port=port)
+    from ollama_guardrails import run_server
+    run_server()

@@ -17,9 +17,9 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from .http_client import forward_request, safe_json, get_http_client
-from .utils import extract_model_from_payload, extract_text_from_payload, extract_text_from_response
-from .language import LanguageDetector
+from ..middleware.http_client import forward_request, safe_json, get_http_client
+from ..utils import extract_model_from_payload, extract_text_from_payload, extract_text_from_response
+from ..utils.language import LanguageDetector
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_cache, HAS_CACHE):
+def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_cache, has_cache):
     """
     Create Ollama endpoints with dependency injection.
     
@@ -36,7 +36,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         guard_manager: LLM Guard manager instance
         concurrency_manager: Concurrency manager instance
         guard_cache: Cache instance (or None)
-        HAS_CACHE: Whether cache is available
+        has_cache: Whether cache is available
     """
     
     # Import streaming handlers
@@ -65,13 +65,13 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
             # Input guard with cache
             if config.get('enable_input_guard', True) and prompt:
                 input_result = None
-                if HAS_CACHE and guard_cache:
+                if has_cache and guard_cache:
                     input_result = await guard_cache.get_input_result(prompt)
                     if input_result:
                         logger.debug("Input scan cache hit")
                 if not input_result:
                     input_result = await guard_manager.scan_input(prompt, block_on_error=config.get('block_on_guard_error', False))
-                    if HAS_CACHE and guard_cache:
+                    if has_cache and guard_cache:
                         try:
                             await guard_cache.set_input_result(prompt, input_result)
                         except Exception:
@@ -143,13 +143,13 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
             if config.get('enable_output_guard', True):
                 output_text = extract_text_from_response(data)
                 output_result = None
-                if output_text and HAS_CACHE and guard_cache:
+                if output_text and has_cache and guard_cache:
                     output_result = await guard_cache.get_output_result(output_text)
                     if output_result:
                         logger.debug("Output scan cache hit")
                 if output_result is None:
                     output_result = await guard_manager.scan_output(output_text, prompt=prompt, block_on_error=config.get('block_on_guard_error', False))
-                    if output_text and HAS_CACHE and guard_cache:
+                    if output_text and has_cache and guard_cache:
                         try:
                             await guard_cache.set_output_result(output_text, output_result)
                         except Exception:
@@ -244,7 +244,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
             # Scan input with cache
             if config.get('enable_input_guard', True) and prompt:
                 input_result = None
-                if HAS_CACHE and guard_cache:
+                if has_cache and guard_cache:
                     input_result = await guard_cache.get_input_result(prompt)
                     if input_result:
                         logger.debug("Input scan cache hit")
@@ -253,7 +253,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                         prompt,
                         block_on_error=config.get('block_on_guard_error', False)
                     )
-                    if HAS_CACHE and guard_cache:
+                    if has_cache and guard_cache:
                         try:
                             await guard_cache.set_input_result(prompt, input_result)
                         except Exception:

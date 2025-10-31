@@ -15,7 +15,7 @@ from typing import Dict, Any
 
 import httpx
 
-from .language import LanguageDetector
+from ..utils.language import LanguageDetector
 
 logger = logging.getLogger(__name__)
 min_output_length = 50

@@ -1,0 +1,15 @@
+include README.md
+include LICENSE
+include CHANGES.md
+include requirements.txt
+include pyproject.toml
+include setup.py
+
+recursive-include src *.py
+recursive-include config *.yaml *.conf
+recursive-include docs *.md *.rst
+recursive-exclude tests *
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.so
+recursive-exclude * .git*

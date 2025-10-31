@@ -51,3 +51,9 @@ class LanguageDetector:
         if reason and '{reason}' in message:
             message = message.format(reason=reason)
         return message
+
+
+def get_language_message(text: str, message_key: str, reason: str = '') -> str:
+    """Get localized error message based on detected language."""
+    language = LanguageDetector.detect_language(text)
+    return LanguageDetector.get_error_message(message_key, language, reason)

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_manager, guard_cache, HAS_CACHE):
+def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_manager, guard_cache, has_cache):
     """
     Create admin and monitoring endpoints with dependency injection.
     
@@ -32,7 +32,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
         ip_whitelist: IP whitelist manager
         concurrency_manager: Concurrency manager instance
         guard_cache: Cache instance (or None)
-        HAS_CACHE: Whether cache is available
+        has_cache: Whether cache is available
     """
     
     @router.get("/health")
@@ -62,7 +62,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
             health_data['device'] = guard_manager.device
         
         # Add cache stats if available
-        if HAS_CACHE and guard_cache:
+        if has_cache and guard_cache:
             health_data['cache'] = await guard_cache.get_stats()
         
         return health_data
@@ -86,7 +86,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
         safe_config['nginx_whitelist'] = {'enabled': wl['enabled'], 'count': wl['count']}
         
         # Add optimization status
-        if HAS_CACHE:
+        if has_cache:
             safe_config['optimizations'] = {
                 'cache_enabled': guard_cache is not None and guard_cache.enabled,
             }
@@ -110,7 +110,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
             "whitelist": ip_whitelist.get_stats(),
         }
         
-        if HAS_CACHE:
+        if has_cache:
             # Cache stats
             if guard_cache:
                 stats['cache'] = await guard_cache.get_stats()
@@ -120,7 +120,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
     @router.post("/admin/cache/clear")
     async def clear_cache():
         """Clear the cache (admin endpoint)."""
-        if not HAS_CACHE or not guard_cache:
+        if not has_cache or not guard_cache:
             return {"error": "Cache not available"}
         
         await guard_cache.clear()
@@ -129,7 +129,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
     @router.post("/admin/cache/cleanup")
     async def cleanup_cache():
         """Clean up expired cache entries."""
-        if not HAS_CACHE or not guard_cache:
+        if not has_cache or not guard_cache:
             return {"error": "Cache not available"}
         
         removed = await guard_cache.cleanup_expired()

@@ -64,7 +64,7 @@ PORT="${PORT:-9999}"
 LOG_LEVEL="${LOG_LEVEL:-info}"             # info, debug, warning, error
 RELOAD="${RELOAD:-false}"
 CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/config/config.yaml}"
-PROXY_MODULE="src.ollama_guard_proxy:app"
+PROXY_MODULE="ollama_guardrails.app:app"
 LLM_GUARD_USE_LOCAL_MODELS="True"
 SCAN_FAIL_FAST="True"
 # Command to execute (start, stop, restart, status, logs, run)
