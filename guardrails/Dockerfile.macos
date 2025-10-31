@@ -1,11 +1,11 @@
 # Optimized Dockerfile for macOS with Apple Silicon (M1/M2/M3)
 # This Dockerfile is specifically optimized for ARM64 architecture
-FROM --platform=linux/arm64 python:3.11-slim
+FROM --platform=linux/arm64 python:3.12-slim
 
 WORKDIR /app
 
 # Build arguments
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.12
 ARG TORCH_VERSION=2.1.0
 
 LABEL maintainer="AI4Team"

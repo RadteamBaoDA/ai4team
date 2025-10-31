@@ -14,14 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     make \
     libgomp1 \
+    git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copy requirements
+# Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
 # Install Python dependencies with platform-specific optimizations
-# For Apple Silicon (ARM64), use pre-built wheels when available
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
         echo "Building for ARM64 (Apple Silicon compatible)"; \
@@ -29,17 +29,26 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
         pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
     else \
         echo "Building for x86_64"; \
+        # Install PyTorch with CUDA support for x86_64
+        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu118; \
     fi && \
+    # Install core dependencies
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application files in new structure
+# Copy application files
 COPY main.py .
+COPY pyproject.toml .
+COPY setup.py .
 COPY src/ ./src/
 COPY config/ ./config/
-COPY requirements.txt .
+COPY scripts/ ./scripts/
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/models
+# Install the package in development mode
+RUN pip install -e .
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/logs /app/models /app/cache && \
+    chmod 755 /app/logs /app/models /app/cache
 
 # Set environment variables for optimal performance
 ENV PYTHONUNBUFFERED=1 \
@@ -51,24 +60,29 @@ ENV PYTHONUNBUFFERED=1 \
     OMP_NUM_THREADS=4 \
     MKL_NUM_THREADS=4 \
     OPENBLAS_NUM_THREADS=4 \
-    # Guardrails configuration
-    LLM_GUARD_DEVICE=cpu \
-    LLM_GUARD_USE_LOCAL_MODELS=false \
+    # Reranker default configuration
+    HOST=0.0.0.0 \
+    PORT=8000 \
+    LOG_LEVEL=INFO \
+    RERANKER_DEVICE=auto \
+    RERANKER_MAX_PARALLEL=4 \
+    RERANKER_BATCH_SIZE=16 \
+    ENABLE_PREDICTION_CACHE=true \
     # Security hardening
     PYTHONHTTPSVERIFY=1
 
 # Create non-root user for security
-RUN useradd -m -u 1000 -s /bin/bash appuser && \
-    chown -R appuser:appuser /app
+RUN useradd -m -u 1000 -s /bin/bash reranker && \
+    chown -R reranker:reranker /app
 
-USER appuser
+USER reranker
 
 # Expose port
-EXPOSE 8080
+EXPOSE 8000
 
-# Health check with improved parameters
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the proxy with uvicorn for better performance
+# Set the default command
 CMD ["python", "main.py"]

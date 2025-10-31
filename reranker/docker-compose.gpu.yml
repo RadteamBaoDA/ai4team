@@ -1,0 +1,113 @@
+version: '3.8'
+
+# GPU-optimized configuration for NVIDIA GPUs
+services:
+  # Redis for GPU setup
+  redis:
+    image: redis:7-alpine
+    container_name: reranker-redis-gpu
+    hostname: redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data_gpu:/data
+    restart: unless-stopped
+    networks:
+      - reranker_gpu
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # GPU-optimized reranker service
+  reranker:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu  # Use GPU-specific Dockerfile
+    container_name: reranker-service-gpu
+    hostname: reranker
+    ports:
+      - "8000:8000"
+    environment:
+      # Model Configuration for GPU
+      - RERANKER_MODEL=BAAI/bge-reranker-base
+      - RERANKER_MAX_LENGTH=512
+      - RERANKER_QUANTIZATION=int8  # Use quantization to save GPU memory
+      
+      # GPU-optimized performance settings
+      - RERANKER_MAX_PARALLEL=16   # Higher parallelism for GPU
+      - RERANKER_MAX_QUEUE=50      # Larger queue for GPU throughput
+      - RERANKER_QUEUE_TIMEOUT=120
+      - RERANKER_BATCH_SIZE=64     # Large batches for GPU efficiency
+      - RERANKER_WORKER_TIMEOUT=180
+      
+      # GPU Device Configuration
+      - RERANKER_DEVICE=cuda
+      - RERANKER_USE_MLX=false
+      - CUDA_VISIBLE_DEVICES=0     # Specify which GPU to use
+      
+      # Caching Configuration
+      - ENABLE_PREDICTION_CACHE=true
+      - CACHE_TTL_SECONDS=1800     # Longer cache for GPU workloads
+      - CLEAR_CACHE_INTERVAL=7200
+      
+      # Redis Configuration
+      - REDIS_ENABLED=true
+      - REDIS_URL=redis://redis:6379/0
+      
+      # Advanced Features for GPU
+      - MICRO_BATCH_ENABLED=true
+      - MICRO_BATCH_WINDOW_MS=5.0  # Shorter window for GPU speed
+      - RERANKER_ENABLE_DISTRIBUTED=true
+      
+      # Server Configuration
+      - HOST=0.0.0.0
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      
+      # GPU-specific optimizations
+      - WARMUP_ON_START=true
+      - ENABLE_TORCH_COMPILE=true   # Can improve GPU performance
+      - ENABLE_MIXED_PRECISION=true # fp16 for faster GPU inference
+      - RERANKER_MAX_RETRIES=3
+      
+      # CUDA optimizations
+      - TORCH_CUDNN_BENCHMARK=1
+      - CUDA_LAUNCH_BLOCKING=0
+    volumes:
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./cache:/app/cache
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - reranker_gpu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # More time for GPU model loading
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  redis_data_gpu:
+    driver: local
+
+networks:
+  reranker_gpu:
+    driver: bridge

@@ -1,0 +1,112 @@
+version: '3.8'
+
+# Apple Silicon (M-series Mac) optimized configuration
+services:
+  # Redis optimized for Apple Silicon
+  redis:
+    image: redis:7-alpine
+    container_name: reranker-redis-macos
+    platform: linux/arm64
+    hostname: redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data_macos:/data
+    restart: unless-stopped
+    networks:
+      - reranker_macos
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # Reranker service optimized for Apple Silicon
+  reranker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
+    container_name: reranker-service-macos
+    platform: linux/arm64
+    hostname: reranker
+    ports:
+      - "8000:8000"
+    environment:
+      # Model Configuration optimized for Apple Silicon
+      - RERANKER_MODEL=BAAI/bge-reranker-base
+      - RERANKER_MAX_LENGTH=512
+      - RERANKER_QUANTIZATION=bf16
+      
+      # Apple Silicon optimized performance settings
+      - RERANKER_MAX_PARALLEL=6  # M-series chips handle more parallel tasks well
+      - RERANKER_MAX_QUEUE=15
+      - RERANKER_QUEUE_TIMEOUT=60
+      - RERANKER_BATCH_SIZE=32   # Larger batches work well with unified memory
+      - RERANKER_WORKER_TIMEOUT=120
+      
+      # Apple Silicon specific device configuration
+      - RERANKER_DEVICE=mps      # Use Metal Performance Shaders
+      - RERANKER_USE_MLX=true    # Enable MLX if available
+      
+      # Caching Configuration
+      - ENABLE_PREDICTION_CACHE=true
+      - CACHE_TTL_SECONDS=900
+      - CLEAR_CACHE_INTERVAL=3600
+      
+      # Redis Configuration
+      - REDIS_ENABLED=true
+      - REDIS_URL=redis://redis:6379/0
+      
+      # Advanced Features optimized for Apple Silicon
+      - MICRO_BATCH_ENABLED=true
+      - MICRO_BATCH_WINDOW_MS=10.0
+      - RERANKER_ENABLE_DISTRIBUTED=true
+      
+      # Server Configuration
+      - HOST=0.0.0.0
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      
+      # Apple Silicon specific optimizations
+      - WARMUP_ON_START=true
+      - ENABLE_TORCH_COMPILE=false  # May not be stable on MPS
+      - ENABLE_MIXED_PRECISION=false  # MPS has different precision handling
+      - RERANKER_MAX_RETRIES=3
+      
+      # Apple Silicon memory optimizations
+      - OMP_NUM_THREADS=8        # Leverage more cores on Apple Silicon
+      - MKL_NUM_THREADS=8
+    volumes:
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./cache:/app/cache
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - reranker_macos
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 6G  # Apple Silicon has unified memory, can be more generous
+        reservations:
+          memory: 3G
+
+volumes:
+  redis_data_macos:
+    driver: local
+
+networks:
+  reranker_macos:
+    driver: bridge

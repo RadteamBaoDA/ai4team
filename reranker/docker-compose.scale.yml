@@ -1,0 +1,109 @@
+version: '3.8'
+
+# Multi-instance scaling configuration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.scale.yml up --scale reranker=3
+
+services:
+  # Override reranker service for scaling
+  reranker:
+    deploy:
+      replicas: 3  # Default number of replicas
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 1.5G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    # Remove port mapping to allow multiple instances
+    ports: []
+    
+  # Load balancer (enable the profile)
+  nginx:
+    profiles: []  # Remove profile to always start
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - NGINX_WORKER_PROCESSES=auto
+      - NGINX_WORKER_CONNECTIONS=1024
+    depends_on:
+      - reranker
+
+  # Additional reranker instances with specific configurations
+  reranker-gpu-1:
+    extends:
+      service: reranker
+    container_name: reranker-gpu-1
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - RERANKER_MAX_PARALLEL=8
+    profiles:
+      - multi-gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+
+  reranker-gpu-2:
+    extends:
+      service: reranker
+    container_name: reranker-gpu-2
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+      - RERANKER_MAX_PARALLEL=8
+    profiles:
+      - multi-gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+
+  # Monitoring services
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: reranker-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - reranker_network
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: reranker-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning:ro
+    networks:
+      - reranker_network
+    profiles:
+      - monitoring
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

@@ -1,0 +1,69 @@
+version: '3.8'
+
+# Development configuration - minimal setup for local development
+services:
+  # Redis for development (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: reranker-redis-dev
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly no --save ""
+    restart: unless-stopped
+    networks:
+      - reranker_dev
+    profiles:
+      - redis  # Start with: docker-compose -f docker-compose.dev.yml --profile redis up
+
+  # Reranker service for development
+  reranker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: reranker-dev
+    ports:
+      - "8000:8000"
+    environment:
+      # Development configuration
+      - RERANKER_MODEL=BAAI/bge-reranker-base
+      - RERANKER_MAX_PARALLEL=2
+      - RERANKER_MAX_QUEUE=5
+      - RERANKER_BATCH_SIZE=8
+      - RERANKER_WORKER_TIMEOUT=60
+      
+      # Device Configuration
+      - RERANKER_DEVICE=auto
+      - RERANKER_USE_MLX=false
+      
+      # Caching (local only for dev)
+      - ENABLE_PREDICTION_CACHE=true
+      - CACHE_TTL_SECONDS=300
+      - REDIS_ENABLED=false
+      
+      # Server Configuration
+      - HOST=0.0.0.0
+      - PORT=8000
+      - LOG_LEVEL=DEBUG
+      
+      # Disable heavy optimizations for development
+      - WARMUP_ON_START=false
+      - ENABLE_TORCH_COMPILE=false
+      - ENABLE_MIXED_PRECISION=false
+      - MICRO_BATCH_ENABLED=false
+    volumes:
+      - ./logs:/app/logs
+      - ./cache:/app/cache
+      - ./src:/app/src  # Mount source for live reloading
+    restart: unless-stopped
+    networks:
+      - reranker_dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  reranker_dev:
+    driver: bridge

@@ -1,0 +1,83 @@
+# GPU-optimized Dockerfile for NVIDIA GPUs
+FROM nvidia/cuda:11.8-runtime-ubuntu22.04 AS base
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    curl \
+    gcc \
+    g++ \
+    make \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && ln -s /usr/bin/python3.11 /usr/bin/python
+
+# Copy requirements first for better Docker layer caching
+COPY requirements.txt .
+
+# Install Python dependencies with CUDA support
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    # Install PyTorch with CUDA 11.8 support
+    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 && \
+    # Install core dependencies
+    pip install --no-cache-dir -r requirements.txt && \
+    # Install additional GPU optimization packages
+    pip install --no-cache-dir bitsandbytes>=0.41.0
+
+# Copy application files
+COPY main.py .
+COPY pyproject.toml .
+COPY setup.py .
+COPY src/ ./src/
+COPY config/ ./config/
+COPY scripts/ ./scripts/
+
+# Install the package in development mode
+RUN pip install -e .
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/logs /app/models /app/cache && \
+    chmod 755 /app/logs /app/models /app/cache
+
+# Set environment variables optimized for GPU
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # CUDA optimizations
+    CUDA_VISIBLE_DEVICES=0 \
+    TORCH_CUDNN_BENCHMARK=1 \
+    CUDA_LAUNCH_BLOCKING=0 \
+    # Reranker GPU configuration
+    HOST=0.0.0.0 \
+    PORT=8000 \
+    LOG_LEVEL=INFO \
+    RERANKER_DEVICE=cuda \
+    RERANKER_MAX_PARALLEL=16 \
+    RERANKER_BATCH_SIZE=64 \
+    ENABLE_PREDICTION_CACHE=true \
+    ENABLE_MIXED_PRECISION=true \
+    # Security hardening
+    PYTHONHTTPSVERIFY=1
+
+# Create non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash reranker && \
+    chown -R reranker:reranker /app
+
+USER reranker
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Set the default command
+CMD ["python", "main.py"]
