@@ -18,38 +18,100 @@ A comprehensive, production-ready platform combining secure LLM deployment, know
 
 ```
 ai4team/
-├── guardrails/              # LLM security & proxy layer
-│   ├── ollama_guard_proxy.py         # Main FastAPI proxy with LLM Guard
-│   ├── nginx-guard.conf              # Nginx config for proxy
-│   ├── nginx-ollama-production.conf  # Production Nginx with rate limiting
-│   ├── requirements.txt               # Python dependencies
-│   ├── config.example.yaml            # Configuration template
-│   ├── docker-compose.yml             # Docker stack
-│   └── [documentation files]          # Comprehensive guides
+├── guardrails/              # LLM Security & Proxy Layer
+│   ├── src/                          # Modular source code (v2.0)
+│   │   ├── ollama_guard_proxy.py     # Main FastAPI application
+│   │   ├── guard_manager.py          # LLM Guard scanner integration
+│   │   ├── endpoints_ollama.py       # Ollama API endpoints
+│   │   ├── endpoints_openai.py       # OpenAI-compatible endpoints
+│   │   ├── endpoints_admin.py        # Admin & monitoring endpoints
+│   │   ├── concurrency.py            # Per-model concurrency control
+│   │   ├── language.py               # Multilingual error handling
+│   │   ├── cache.py                  # Redis + in-memory caching
+│   │   └── [10+ other modules]       # Utilities, IP whitelist, etc.
+│   ├── scripts/                      # Cross-platform execution scripts
+│   │   ├── run_proxy.sh/bat          # Proxy runners (Linux/Windows)
+│   │   ├── deploy-nginx.sh/bat       # Nginx deployment scripts
+│   │   └── setup_concurrency.sh/bat  # Setup scripts
+│   ├── config/                       # Configuration files
+│   │   ├── config.yaml               # Main application config
+│   │   └── nginx-*.conf              # Nginx configurations
+│   ├── docker/                       # Docker deployment
+│   │   ├── docker-compose.yml        # Main compose file
+│   │   ├── docker-compose-redis.yml  # Redis cache addon
+│   │   └── docker-compose-macos.yml  # macOS optimized
+│   ├── main.py                       # Application entry point
+│   ├── requirements.txt              # Python dependencies
+│   └── docs/                         # Comprehensive documentation
 │
-├── knowledgebase/           # RAGFlow knowledge base
-│   ├── docker-compose.yml            # Knowledge base services
-│   ├── nginx/
+├── reranker/                # Document Reranking Service
+│   ├── src/reranker/                 # Organized package structure
+│   │   ├── api/                      # FastAPI application layer
+│   │   │   ├── app.py                # FastAPI app factory
+│   │   │   └── routes.py             # API route definitions
+│   │   ├── core/                     # Core business logic
+│   │   │   ├── config.py             # Configuration management
+│   │   │   ├── concurrency.py        # Enhanced concurrency
+│   │   │   └── unified_reranker.py   # Quantization support
+│   │   ├── models/                   # Data models & schemas
+│   │   │   └── schemas.py            # Pydantic models
+│   │   ├── services/                 # Business logic services
+│   │   │   └── reranker_service.py   # Main service implementation
+│   │   └── utils/                    # Utility functions
+│   │       ├── distributed_cache.py  # Redis implementation
+│   │       ├── micro_batcher.py      # Batching optimization
+│   │       └── normalization.py      # Text preprocessing
+│   ├── scripts/                      # Management scripts
+│   │   ├── start_reranker.sh         # Service startup
+│   │   ├── manage_reranker.sh        # Service management
+│   │   └── performance_test.sh       # Load testing
+│   ├── config/                       # Environment configurations
+│   │   ├── development.env           # Development settings
+│   │   ├── production.env            # Production settings
+│   │   └── apple_silicon.env         # Apple Silicon optimized
+│   ├── tests/                        # Test suite
+│   │   ├── unit/                     # Unit tests
+│   │   └── integration/              # Integration tests
+│   ├── main.py                       # Application entry point
+│   ├── pyproject.toml                # Modern Python packaging
+│   └── requirements.txt              # Dependencies
+│
+├── llm/                     # LiteLLM Proxy with Guard Integration
+│   ├── run_litellm_proxy.py          # Main proxy launcher
+│   ├── litellm_guard_hooks.py        # Custom guardrail hooks
+│   ├── litellm_config.yaml           # LiteLLM configuration
+│   ├── test_litellm_integration.py   # Integration tests
+│   ├── install_dependencies.py       # Dependency installer
+│   ├── docker-compose.yml            # Docker deployment
+│   ├── requirements.txt              # Python dependencies
+│   └── docs/                         # Deployment guides
+│
+├── knowledgebase/           # RAGFlow Knowledge Base
+│   ├── docker-compose*.yml           # Multiple deployment configs
+│   ├── nginx/                        # Nginx proxy configuration
 │   │   ├── nginx.conf                # Main Nginx config
 │   │   ├── proxy.conf                # Proxy settings
 │   │   └── ragflow.conf              # RAGFlow routing
+│   ├── entrypoint.sh                 # Service orchestration script
 │   ├── init.sql                      # Database initialization
-│   └── infinity_conf.toml            # Embedding configuration
+│   ├── infinity_conf.toml            # Embedding configuration
+│   └── service_conf.yaml             # Service configuration
 │
-├── chat/                    # Real-time chat service
-│   ├── master.compose.yaml           # Master node compose
-│   ├── slave.compose.yaml            # Slave node compose
-│   └── chat.conf                     # Chat load balancer config
+├── chat/                    # Real-time Chat Service
+│   ├── master.compose.yaml           # Master node deployment
+│   ├── slave.compose.yaml            # Slave node deployment
+│   └── chat.conf                     # Load balancer config
 │
-├── s3/                      # MinIO S3-compatible storage
+├── s3/                      # MinIO S3-Compatible Storage
 │   ├── master.compose.yml            # Master MinIO instance
 │   ├── slave.compose.yml             # Slave MinIO instance
 │   └── s3.conf                       # S3 load balancer config
 │
-├── llm/                     # LLM model configuration
-│   └── ollama.conf                   # Ollama server config
+├── monitor/                 # Monitoring & Observability
+│   ├── langfuse.compose.yml          # Langfuse deployment
+│   └── docs/                         # Monitoring guides
 │
-└── [documentation]          # Project documentation
+└── [documentation]          # Project-wide documentation
 ```
 
 ## 🚀 Quick Start
@@ -70,21 +132,31 @@ cd guardrails
 pip install -r requirements.txt
 
 # Configure (copy and edit)
-cp config.example.yaml config.yaml
+cp config/config.example.yaml config/config.yaml
 
-# Run locally
-python ollama_guard_proxy.py
+# Run locally (v2.0 entry point)
+python main.py
 
-# Or with Uvicorn
-uvicorn ollama_guard_proxy:app --host 0.0.0.0 --port 8080 --workers 4
+# Or with scripts (cross-platform)
+./scripts/run_proxy.sh      # Linux/macOS
+./scripts/run_proxy.bat     # Windows
+
+# Or directly with Uvicorn
+uvicorn src.ollama_guard_proxy:app --host 0.0.0.0 --port 8080 --workers 4
 ```
 
 ### 2. Docker Deployment
 
 ```bash
 # Start complete stack with guard proxy
-cd guardrails
+cd guardrails/docker
 docker-compose up -d
+
+# With Redis caching
+docker-compose -f docker-compose.yml -f docker-compose-redis.yml up -d
+
+# macOS optimized (Apple Silicon)
+docker-compose -f docker-compose-macos.yml up -d
 
 # View logs
 docker-compose logs -f guard-proxy
@@ -112,25 +184,59 @@ cd chat
 docker-compose -f master.compose.yaml -f slave.compose.yaml up -d
 ```
 
+### 5. Reranker Service
+
+```bash
+# Quick start with development config
+cd reranker
+source config/development.env
+python main.py
+
+# Production deployment
+source config/production.env
+pip install -e .
+reranker
+
+# Using management scripts
+./scripts/start_reranker.sh
+./scripts/manage_reranker.sh status
+```
+
+### 6. LiteLLM Proxy
+
+```bash
+# Start LiteLLM with guard integration
+cd llm
+python run_litellm_proxy.py --config litellm_config.yaml
+
+# Docker deployment
+docker-compose up -d
+
+# Install dependencies automatically
+python install_dependencies.py
+```
+
 ## 🔐 Security Features
 
 ### LLM Guard Integration
 
 The proxy includes comprehensive security scanning:
 
-**Input Scanners** (5):
-- BanSubstrings - Block dangerous keywords
-- PromptInjection - Detect prompt injection attacks
-- Toxicity - Detect toxic content
-- Secrets - Prevent credential/secret leakage
-- TokenLimit - Enforce token constraints
+### Input Scanners** (7):
+- BanSubstrings - Block malicious phrases
+- PromptInjection - Detect injection attacks
+- Toxicity - Detect toxic language (threshold: 0.5)
+- Secrets - Detect API keys and passwords
+- Code - Detect executable code
+- TokenLimit - Enforce token limits (max: 4000)
+- Anonymize - Detect and redact PII
 
 **Output Scanners** (5):
-- BanSubstrings - Block unwanted content in responses
-- Toxicity - Detect toxic model outputs
-- MaliciousURLs - Identify suspicious links
-- NoRefusal - Ensure refusal detection
-- **NoCode** - Prevent code generation (when needed)
+- BanSubstrings - Block malicious phrases
+- Toxicity - Detect toxic content (threshold: 0.5)
+- MaliciousURLs - Detect malicious links
+- NoRefusal - Ensure no refusal patterns
+- Code - Block code (Python, C#, C++, C)
 
 ### Multilingual Error Messages
 
@@ -274,6 +380,41 @@ docker-compose up -d
 # API available at http://localhost:9001
 ```
 
+## 🔄 Reranker Service
+
+Advanced document reranking with quantization and caching:
+
+- **Optimized Architecture**: Modular package structure with src/
+- **Enhanced Concurrency**: Smart batching and queue management
+- **Quantization Support**: 8-bit quantization for GPU memory optimization
+- **Distributed Caching**: Redis-based caching with fallback
+- **Multiple Backends**: HuggingFace Transformers, MLX (Apple Silicon)
+- **Performance Testing**: Built-in load testing scripts
+
+**Key Features:**
+- **Multi-model Support**: BAAI/bge-reranker-v2-m3, ms-marco models
+- **Apple Silicon Optimization**: MLX backend for M-series Macs
+- **Micro-batching**: Automatic batch optimization
+- **Health Monitoring**: Detailed metrics and health endpoints
+- **Environment Configs**: Development, production, Apple Silicon
+
+**Getting Started:**
+```bash
+cd reranker
+
+# Development mode
+source config/development.env
+python main.py
+
+# Production deployment
+source config/production.env
+pip install -e .
+reranker
+
+# Performance testing
+./scripts/performance_test.sh load 100 4
+```
+
 ## 💾 Storage
 
 ### MinIO (S3-Compatible)
@@ -293,6 +434,61 @@ docker-compose -f master.compose.yml -f slave.compose.yml up -d
 - Automatic failover
 - Multipart uploads
 - Bucket lifecycle policies
+
+## 🚀 LiteLLM Proxy
+
+Unified LLM gateway with guardrail integration:
+
+- **Multi-provider Support**: OpenAI, Anthropic, Cohere, Azure, AWS Bedrock
+- **Custom Guardrails**: LLM Guard integration via hooks
+- **Request Routing**: Intelligent model selection and fallbacks
+- **Rate Limiting**: Per-user and per-model quotas
+- **Monitoring**: Prometheus metrics and logging
+- **Cost Tracking**: Usage analytics and budget controls
+
+**Key Features:**
+- **Guardrail Hooks**: Automatic security scanning via `litellm_guard_hooks.py`
+- **Language Detection**: Multilingual error responses
+- **Configuration**: YAML-based model and provider setup
+- **Health Checks**: Comprehensive endpoint monitoring
+- **Auto-installation**: Dependency management script
+
+**Getting Started:**
+```bash
+cd llm
+
+# Install dependencies automatically
+python install_dependencies.py
+
+# Start proxy with guardrails
+python run_litellm_proxy.py --config litellm_config.yaml
+
+# Docker deployment
+docker-compose up -d
+
+# Test integration
+python test_litellm_integration.py
+```
+
+## 📊 Monitoring & Observability
+
+Comprehensive monitoring with Langfuse integration:
+
+- **LLM Tracing**: Complete request/response tracking
+- **Performance Metrics**: Latency, throughput, error rates
+- **Cost Analysis**: Token usage and provider costs
+- **User Analytics**: Usage patterns and trends
+- **Dashboard**: Real-time monitoring interface
+
+**Getting Started:**
+```bash
+cd monitor
+
+# Start Langfuse monitoring
+docker-compose -f langfuse.compose.yml up -d
+
+# Access dashboard at http://localhost:3000
+```
 
 ## 🔧 Configuration
 
@@ -314,17 +510,25 @@ GUARD_ENABLE_OUTPUT_SCANNING=true
 
 ### YAML Configuration
 
-Create `config.yaml` from `config.example.yaml`:
+Create `config/config.yaml` from `config/config.example.yaml`:
 
 ```yaml
-ollama:
-  url: http://127.0.0.1:11434
-  timeout: 300
+# Ollama backend configuration
+ollama_url: http://127.0.0.1:11434
+request_timeout: 300
 
-proxy:
-  host: 0.0.0.0
-  port: 8080
-  workers: 4
+# Proxy server settings
+proxy_host: 0.0.0.0
+proxy_port: 8080
+
+# Concurrency control (v2.0)
+ollama_num_parallel: auto
+ollama_max_queue: 512
+enable_queue_stats: true
+
+# Guard settings (enhanced in v2.0)
+enable_input_guard: true
+enable_output_guard: true
 
 guard:
   input_scanners:
@@ -332,13 +536,26 @@ guard:
     - PromptInjection
     - Toxicity
     - Secrets
+    - Code
     - TokenLimit
+    - Anonymize
   output_scanners:
     - BanSubstrings
     - Toxicity
     - MaliciousURLs
     - NoRefusal
-    - NoCode
+    - Code
+
+# Caching configuration (Redis + in-memory)
+cache:
+  enabled: true
+  redis_url: redis://localhost:6379
+  ttl_seconds: 3600
+
+# IP whitelist for nginx-only access
+nginx_whitelist:
+  - "127.0.0.1"
+  - "192.168.1.0/24"
 ```
 
 ## 📊 Monitoring & Logging
@@ -374,6 +591,16 @@ python ollama_guard_proxy.py
 # Run guard proxy tests
 cd guardrails
 pytest tests/ -v
+
+# Run reranker tests
+cd reranker
+pytest tests/ -v
+
+# Test with coverage
+pytest --cov=src --cov-report=html
+
+# Test specific modules
+pytest tests/unit/test_config.py -v
 ```
 
 ### Integration Tests
@@ -431,13 +658,22 @@ wrk -t4 -c100 -d30s http://localhost:8080/health
 **Issue: Guard proxy won't start**
 ```bash
 # Check dependencies
-pip install -r guardrails/requirements.txt
+cd guardrails
+pip install -r requirements.txt
+
+# Use new v2.0 entry point
+python main.py
+
+# Or use setup script
+./scripts/setup_concurrency.sh    # Linux/macOS
+./scripts/setup_concurrency.bat   # Windows
 
 # Verify Ollama is running
 curl http://127.0.0.1:11434/api/tags
 
 # Check port availability
-lsof -i :8080
+lsof -i :8080   # Linux/macOS
+netstat -an | findstr :8080   # Windows
 ```
 
 **Issue: Language detection not working**
@@ -451,9 +687,13 @@ docker-compose logs guard-proxy | grep "Detected language"
 
 **Issue: Rate limiting blocking requests**
 ```bash
-# Temporarily disable in nginx-ollama-production.conf
+# Temporarily disable in config/nginx-ollama-production.conf
 # Or adjust limits in nginx config
 # limit_req zone=api_limit burst=50 nodelay;
+
+# Deploy updated nginx config
+./scripts/deploy-nginx.sh    # Linux/macOS
+./scripts/deploy-nginx.bat   # Windows
 ```
 
 ### Debug Mode
@@ -463,21 +703,41 @@ docker-compose logs guard-proxy | grep "Detected language"
 export LOG_LEVEL=DEBUG
 export PYTHONUNBUFFERED=1
 
-# Run with debug output
-python -u ollama_guard_proxy.py
+# Run with debug output (v2.0)
+python main.py
+
+# Or use scripts with debug
+DEBUG=1 ./scripts/run_proxy.sh
 ```
 
 ## 📖 Documentation
 
 Comprehensive guides included:
 
+### Guardrails Documentation (v2.0)
+- **PROJECT_STRUCTURE.md** - Complete v2.0 modular architecture
+- **COMPLETION_REPORT.md** - Multi-scanner refactor details
 - **MULTILINGUAL_ERROR_MESSAGES.md** - Language detection & error responses
 - **MULTILINGUAL_TESTING.md** - Testing across 7 languages
 - **API_UPDATES.md** - Complete API reference
+- **CONCURRENCY_GUIDE.md** - Per-model concurrency control
+- **CONNECTION_CLEANUP_OPTIMIZATION.md** - Performance optimizations
 - **NGINX_ENDPOINTS_UPDATE.md** - Load balancing configuration
+
+### Reranker Documentation
+- **STRUCTURE_README.md** - Optimized package structure
+- **CLEANUP_COMPLETE.md** - File reorganization details
+- **README_UPDATE_COMPLETE.md** - Documentation updates
+- **OPTIMIZATION_COMPLETE.md** - Performance enhancements
+- **ADVANCED_FEATURES.md** - Full feature guide
+
+### LLM Proxy Documentation
+- **DEPLOYMENT_SCRIPTS.md** - LiteLLM deployment guides
+- Integration guides for custom guardrails
+
+### Infrastructure Documentation
 - **DEPLOYMENT.md** - Production deployment guide
 - **NGINX_SETUP_COMPLETE.md** - Nginx configuration details
-- **USAGE.md** - Complete usage guide
 - **TROUBLESHOOTING.md** - Common issues and solutions
 
 ## 🚢 Deployment
@@ -497,11 +757,22 @@ Comprehensive guides included:
 
 ```bash
 # Start all services
-cd guardrails
+cd guardrails/docker
 docker-compose -f docker-compose.yml up -d
 
-# Or with multiple workers (using docker stack deploy)
-docker stack deploy -c docker-compose.yml ai4team
+# With Redis caching for better performance
+docker-compose -f docker-compose.yml -f docker-compose-redis.yml up -d
+
+# Or with Docker Swarm (using docker stack deploy)
+docker stack deploy -c docker-compose.yml ai4team-stack
+
+# Full stack deployment across all services
+cd ../..
+docker-compose -f guardrails/docker/docker-compose.yml \
+               -f knowledgebase/docker-compose.yml \
+               -f llm/docker-compose.yml \
+               -f chat/master.compose.yaml \
+               -f s3/master.compose.yml up -d
 ```
 
 ### Kubernetes Deployment
@@ -528,14 +799,25 @@ spec:
 ### Update Components
 
 ```bash
-# Update proxy
+# Update guardrails proxy
 cd guardrails
 pip install --upgrade -r requirements.txt
-python ollama_guard_proxy.py --version
+python main.py --version
 
-# Update container
+# Update reranker service
+cd ../reranker
+pip install --upgrade -r requirements.txt
+pip install -e .
+
+# Update containers
+cd ../guardrails/docker
 docker-compose pull
 docker-compose up -d
+
+# Update all services
+docker-compose -f ../guardrails/docker/docker-compose.yml \
+               -f ../knowledgebase/docker-compose.yml \
+               -f ../llm/docker-compose.yml pull
 ```
 
 ## 📝 Contributing
@@ -576,19 +858,32 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📊 Project Stats
 
-- **Total Endpoints**: 13 (10 with guard, 3 pass-through)
+- **Total Endpoints**: 20+ (Ollama, OpenAI, Admin APIs)
 - **Supported Languages**: 7 (Chinese, Vietnamese, Japanese, Korean, Russian, Arabic, English)
-- **Security Scanners**: 10 (5 input + 5 output)
-- **Documentation Files**: 10+
-- **Configuration Options**: 50+
+- **Security Scanners**: 12 (7 input + 5 output scanners)
+- **Core Services**: 6 (Guardrails, Reranker, LLM Proxy, Knowledge Base, Chat, S3)
+- **Source Files**: 110+ Python files across all services
+- **Documentation Files**: 50+ comprehensive guides
+- **Configuration Options**: 100+ settings across all services
+- **Docker Compose Files**: 16 deployment configurations
 
 ## 🗓️ Version History
 
-### v1.0.0 (Current)
+### v2.0.0 (Current - January 2025)
+- ✅ **Major Architecture Refactor**: Modularized monolithic codebase
+- ✅ **Enhanced Guardrails**: 12 scanners (7 input + 5 output)
+- ✅ **Reranker Service**: Complete package with quantization support
+- ✅ **LiteLLM Integration**: Custom guardrail hooks
+- ✅ **Concurrency Control**: Per-model request management
+- ✅ **Caching Layer**: Redis + in-memory fallback
+- ✅ **Cross-platform Scripts**: Linux, macOS, Windows support
+- ✅ **Modern Packaging**: pyproject.toml, structured modules
+
+### v1.0.0 (December 2024)
 - ✅ Complete LLM Guard integration
 - ✅ Multilingual error messages (7 languages)
 - ✅ Nginx load balancing with rate limiting
-- ✅ Knowledge base integration
+- ✅ Knowledge base integration (RAGFlow)
 - ✅ S3 storage with MinIO
 - ✅ Docker Compose deployment
 - ✅ Comprehensive documentation
@@ -606,6 +901,7 @@ Built with:
 
 ---
 
-**Last Updated**: October 16, 2025  
+**Last Updated**: October 31, 2025  
+**Version**: v2.0.0 (Major Architecture Refactor)  
 **Maintained By**: [RadteamBaoDA](https://github.com/RadteamBaoDA)  
 **License**: MIT
