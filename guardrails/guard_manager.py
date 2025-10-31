@@ -122,26 +122,43 @@ class LLMGuardManager:
         """
         Detect the best available compute device for ML models.
         
-        Note: GPU support (MPS/CUDA) disabled - torch dependency removed for Python 3.12 compatibility.
-        LLM-guard will use CPU for inference, which is suitable for most use cases.
+        Supports:
+        - CPU: Universal support for all platforms
+        - MPS: Apple Silicon GPU acceleration (M1/M2/M3 chips)
+        
+        Note: CUDA/NVIDIA GPU support removed for simplicity. Use CPU or Apple Silicon MPS.
         
         Returns:
-            Device string: always 'cpu'
+            Device string: 'cpu' or 'mps'
         """
         # Check for explicit device override
         device_override = os.environ.get('LLM_GUARD_DEVICE', '').lower()
-        if device_override and device_override != 'cpu':
-            logger.warning(f'Device override "{device_override}" ignored - GPU support disabled (torch removed)')
+        if device_override in ('cpu', 'mps'):
+            logger.info(f'Device override: {device_override}')
+            return device_override
+        elif device_override:
+            logger.warning(f'Invalid device override "{device_override}" - must be "cpu" or "mps"')
         
-        # Always use CPU (torch dependency removed)
-        cpu_count = os.cpu_count() or 1
         system = platform.system()
         machine = platform.machine()
-        logger.info(f'Using CPU for ML inference - System: {system}, Machine: {machine}, Cores: {cpu_count}')
+        cpu_count = os.cpu_count() or 1
         
+        # Auto-detect Apple Silicon MPS
         if machine == 'arm64' and system == 'Darwin':
-            logger.info('Running on Apple Silicon - CPU performance should be excellent')
+            try:
+                import torch
+                if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    logger.info(f'Apple Silicon detected - Using MPS GPU acceleration (System: {system}, Machine: {machine}, Cores: {cpu_count})')
+                    return 'mps'
+                else:
+                    logger.info(f'Apple Silicon detected but MPS not available - Using CPU (System: {system}, Machine: {machine}, Cores: {cpu_count})')
+                    return 'cpu'
+            except (ImportError, AttributeError):
+                logger.info(f'Apple Silicon detected but torch not available - Using CPU (System: {system}, Machine: {machine}, Cores: {cpu_count})')
+                return 'cpu'
         
+        # Default to CPU for all other platforms
+        logger.info(f'Using CPU for ML inference - System: {system}, Machine: {machine}, Cores: {cpu_count}')
         return 'cpu'
     
     def _check_local_models_config(self) -> bool:
@@ -231,16 +248,12 @@ class LLMGuardManager:
             # Get base path for local models
             models_base_path = os.environ.get('LLM_GUARD_MODELS_PATH', './models')
             
-            # CPU-only configuration (torch dependency removed)
-            device_kwargs = {
-                'device': self.device  # Always 'cpu'
-            }
-            logger.info('Configuring models for CPU inference')
+            device_name = 'MPS (Apple Silicon GPU)' if self.device == 'mps' else 'CPU'
+            logger.info(f'Configuring models for {device_name} inference')
             
             # Configure Prompt Injection model
             if PROMPT_INJECTION_MODEL:
                 PROMPT_INJECTION_MODEL.kwargs["local_files_only"] = True
-                PROMPT_INJECTION_MODEL.kwargs.update(device_kwargs)
                 PROMPT_INJECTION_MODEL.path = os.path.join(models_base_path, "deberta-v3-base-prompt-injection-v2")
                 logger.info(f'Configured PromptInjection model path: {PROMPT_INJECTION_MODEL.path}')
             
@@ -248,21 +261,19 @@ class LLMGuardManager:
             if DEBERTA_AI4PRIVACY_v2_CONF and "DEFAULT_MODEL" in DEBERTA_AI4PRIVACY_v2_CONF:
                 DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path = os.path.join(models_base_path, "deberta-v3-base_finetuned_ai4privacy_v2")
                 DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].kwargs["local_files_only"] = True
-                DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].kwargs.update(device_kwargs)
+                
                 logger.info(f'Configured Anonymize model path: {DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path}')
             
             # Configure Toxicity model (used for both input and output)
             if TOXICITY_MODEL:
                 TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
                 TOXICITY_MODEL.kwargs["local_files_only"] = True
-                TOXICITY_MODEL.kwargs.update(device_kwargs)
                 logger.info(f'Configured Toxicity model path: {TOXICITY_MODEL.path}')
             
             # Configure Code model (used for both input and output)
             if CODE_MODEL:
                 CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
                 CODE_MODEL.kwargs["local_files_only"] = True
-                CODE_MODEL.kwargs.update(device_kwargs)
                 logger.info(f'Configured Code model path: {CODE_MODEL.path}')
             
             logger.info(f'Local model configuration completed for device: {self.device}')
