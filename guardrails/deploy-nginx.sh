@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 ################################################################################
 # Ollama Guard Proxy + Nginx Load Balancer - Deployment Script

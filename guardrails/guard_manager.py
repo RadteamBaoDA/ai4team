@@ -8,15 +8,6 @@ from fastapi.concurrency import run_in_threadpool
 logger = logging.getLogger(__name__)
 code_language = ['Python', 'C#', 'C++', 'C']
 
-# Check for PyTorch availability and device support
-try:
-    import torch
-    HAS_TORCH = True
-    logger.info(f'PyTorch {torch.__version__} detected')
-except ImportError:
-    HAS_TORCH = False
-    logger.warning('PyTorch not available')
-
 # Direct imports from llm-guard
 try:
     from llm_guard.input_scanners import (
@@ -37,13 +28,33 @@ try:
     )
     from llm_guard.vault import Vault
     from llm_guard import scan_prompt
-    # Import model configurations for local model support
-    from llm_guard.input_scanners.anonymize_helpers import DEBERTA_AI4PRIVACY_v2_CONF
-    from llm_guard.input_scanners.code import DEFAULT_MODEL as INPUT_CODE_MODEL
-    from llm_guard.input_scanners.prompt_injection import V2_MODEL as PROMPT_INJECTION_MODEL
-    from llm_guard.input_scanners.toxicity import DEFAULT_MODEL as INPUT_TOXICITY_MODEL
-    from llm_guard.output_scanners.toxicity import DEFAULT_MODEL as OUTPUT_TOXICITY_MODEL
-    from llm_guard.output_scanners.code import DEFAULT_MODEL as OUTPUT_CODE_MODEL
+    
+    # Import model configurations for local model support (optional - may not exist in all versions)
+    # Use same models for both input and output scanners
+    DEBERTA_AI4PRIVACY_v2_CONF = None
+    CODE_MODEL = None
+    PROMPT_INJECTION_MODEL = None
+    TOXICITY_MODEL = None
+    
+    try:
+        from llm_guard.input_scanners.anonymize_helpers import DEBERTA_AI4PRIVACY_v2_CONF
+    except (ImportError, AttributeError):
+        pass
+    
+    try:
+        from llm_guard.input_scanners.code import DEFAULT_MODEL as CODE_MODEL
+    except (ImportError, AttributeError):
+        pass
+    
+    try:
+        from llm_guard.input_scanners.prompt_injection import V2_MODEL as PROMPT_INJECTION_MODEL
+    except (ImportError, AttributeError):
+        pass
+    
+    try:
+        from llm_guard.input_scanners.toxicity import DEFAULT_MODEL as TOXICITY_MODEL
+    except (ImportError, AttributeError):
+        pass
 
     HAS_LLM_GUARD = True
     logger.info('llm-guard modules imported successfully')
@@ -59,12 +70,11 @@ except ImportError as e:
     scan_prompt = None
     # Model configuration placeholders
     DEBERTA_AI4PRIVACY_v2_CONF = None
-    INPUT_CODE_MODEL = PROMPT_INJECTION_MODEL = INPUT_TOXICITY_MODEL = None
-    OUTPUT_TOXICITY_MODEL = OUTPUT_CODE_MODEL = None
+    CODE_MODEL = PROMPT_INJECTION_MODEL = TOXICITY_MODEL = None
 
 
 class LLMGuardManager:
-    def __init__(self, enable_input: bool = True, enable_output: bool = True, enable_anonymize: bool = True):
+    def __init__(self, enable_input: bool = True, enable_output: bool = True, enable_anonymize: bool = True, lazy_init: bool = True):
         """
         Initialize LLM Guard Manager with input and output scanning capabilities.
         
@@ -75,12 +85,19 @@ class LLMGuardManager:
             enable_input: Enable input scanning (default: True)
             enable_output: Enable output scanning (default: True)
             enable_anonymize: Enable PII anonymization (default: True)
+            lazy_init: If True, defer scanner initialization until first use (default: True)
         """
         self.enable_input = enable_input and HAS_LLM_GUARD
         self.enable_output = enable_output and HAS_LLM_GUARD
         self.enable_anonymize = enable_anonymize and HAS_LLM_GUARD
+        self.lazy_init = lazy_init
         
-        # Detect and configure compute device
+        # Lazy initialization flags
+        self._initialized = False
+        self._input_scanners_initialized = False
+        self._output_scanners_initialized = False
+        
+        # Detect and configure compute device (lightweight)
         self.device = self._detect_device()
         logger.info(f'Using compute device: {self.device}')
         
@@ -93,6 +110,50 @@ class LLMGuardManager:
         
         if not HAS_LLM_GUARD:
             logger.warning('LLM Guard not installed; guard features disabled')
+            return
+        
+        # Immediate initialization if not lazy
+        if not lazy_init:
+            self._initialize_all()
+        else:
+            logger.info('LLM Guard Manager created in lazy mode - scanners will initialize on first use')
+
+    def _detect_device(self) -> str:
+        """
+        Detect the best available compute device for ML models.
+        
+        Note: GPU support (MPS/CUDA) disabled - torch dependency removed for Python 3.12 compatibility.
+        LLM-guard will use CPU for inference, which is suitable for most use cases.
+        
+        Returns:
+            Device string: always 'cpu'
+        """
+        # Check for explicit device override
+        device_override = os.environ.get('LLM_GUARD_DEVICE', '').lower()
+        if device_override and device_override != 'cpu':
+            logger.warning(f'Device override "{device_override}" ignored - GPU support disabled (torch removed)')
+        
+        # Always use CPU (torch dependency removed)
+        cpu_count = os.cpu_count() or 1
+        system = platform.system()
+        machine = platform.machine()
+        logger.info(f'Using CPU for ML inference - System: {system}, Machine: {machine}, Cores: {cpu_count}')
+        
+        if machine == 'arm64' and system == 'Darwin':
+            logger.info('Running on Apple Silicon - CPU performance should be excellent')
+        
+        return 'cpu'
+    
+    def _check_local_models_config(self) -> bool:
+        """Check if local models should be used based on environment variables."""
+        use_local = os.environ.get('LLM_GUARD_USE_LOCAL_MODELS', '').lower() in ('1', 'true', 'yes', 'on')
+        if use_local:
+            logger.info('Local models enabled via LLM_GUARD_USE_LOCAL_MODELS environment variable')
+        return use_local
+    
+    def _initialize_all(self):
+        """Initialize all scanners (used when lazy_init is False)."""
+        if self._initialized:
             return
         
         # Configure local models if enabled
@@ -112,82 +173,54 @@ class LLMGuardManager:
             self._init_input_scanners()
         if self.enable_output:
             self._init_output_scanners()
-
-    def _detect_device(self) -> str:
-        """
-        Detect the best available compute device for ML models.
         
-        Priority order:
-        1. MPS (Apple Silicon GPU) - macOS with Apple Silicon
-        2. CUDA (NVIDIA GPU) - Linux/Windows with NVIDIA GPU
-        3. CPU - Fallback for all platforms
-        
-        Returns:
-            Device string: 'mps', 'cuda', or 'cpu'
-        """
-        if not HAS_TORCH:
-            logger.info('PyTorch not available, using CPU for computations')
-            return 'cpu'
-        
-        # Check for explicit device override
-        device_override = os.environ.get('LLM_GUARD_DEVICE', '').lower()
-        if device_override in ('mps', 'cuda', 'cpu'):
-            if device_override == 'mps' and torch.backends.mps.is_available():
-                logger.info('MPS device explicitly set and available')
-                return 'mps'
-            elif device_override == 'cuda' and torch.cuda.is_available():
-                logger.info('CUDA device explicitly set and available')
-                return 'cuda'
-            elif device_override == 'cpu':
-                logger.info('CPU device explicitly set')
-                return 'cpu'
-            else:
-                logger.warning(f'Device override "{device_override}" not available, using auto-detection')
-        
-        # Auto-detect best available device
-        # Priority 1: Apple Silicon MPS (Metal Performance Shaders)
-        if torch.backends.mps.is_available():
-            system = platform.system()
-            machine = platform.machine()
-            logger.info(f'MPS (Apple Silicon GPU) detected - System: {system}, Machine: {machine}')
-            
-            # Verify MPS is actually functional
-            try:
-                test_tensor = torch.zeros(1, device='mps')
-                del test_tensor
-                logger.info('MPS device verified and functional')
-                return 'mps'
-            except Exception as e:
-                logger.warning(f'MPS available but not functional: {e}, falling back to CPU')
-        
-        # Priority 2: NVIDIA CUDA
-        if torch.cuda.is_available():
-            device_count = torch.cuda.device_count()
-            device_name = torch.cuda.get_device_name(0) if device_count > 0 else 'Unknown'
-            logger.info(f'CUDA GPU detected - Device: {device_name}, Count: {device_count}')
-            return 'cuda'
-        
-        # Priority 3: CPU fallback
-        cpu_count = os.cpu_count() or 1
-        logger.info(f'Using CPU with {cpu_count} cores')
-        
-        # Enable CPU optimizations if available
-        if HAS_TORCH:
-            try:
-                # Enable MKL-DNN optimizations for Intel CPUs
-                torch.set_num_threads(cpu_count)
-                logger.info(f'CPU optimizations enabled: {cpu_count} threads')
-            except Exception as e:
-                logger.debug(f'Could not set CPU optimizations: {e}')
-        
-        return 'cpu'
+        self._initialized = True
+        logger.info('LLM Guard Manager fully initialized')
     
-    def _check_local_models_config(self) -> bool:
-        """Check if local models should be used based on environment variables."""
-        use_local = os.environ.get('LLM_GUARD_USE_LOCAL_MODELS', '').lower() in ('1', 'true', 'yes', 'on')
-        if use_local:
-            logger.info('Local models enabled via LLM_GUARD_USE_LOCAL_MODELS environment variable')
-        return use_local
+    def _ensure_input_scanners_initialized(self):
+        """Ensure input scanners are initialized (lazy loading)."""
+        if self._input_scanners_initialized:
+            return
+        
+        if not self.enable_input or not HAS_LLM_GUARD:
+            return
+        
+        logger.info('Lazy initializing input scanners...')
+        
+        # Configure local models if needed
+        if self.use_local_models and not self._initialized:
+            self._configure_local_models()
+        
+        # Initialize vault if needed for anonymization
+        if self.enable_anonymize and self.vault is None:
+            try:
+                self.vault = Vault()
+                logger.info('Vault initialized for anonymization')
+            except Exception as e:
+                logger.exception('Failed to initialize Vault: %s', e)
+                self.enable_anonymize = False
+        
+        self._init_input_scanners()
+        self._input_scanners_initialized = True
+        logger.info('Input scanners initialized')
+    
+    def _ensure_output_scanners_initialized(self):
+        """Ensure output scanners are initialized (lazy loading)."""
+        if self._output_scanners_initialized:
+            return
+        
+        if not self.enable_output or not HAS_LLM_GUARD:
+            return
+        
+        logger.info('Lazy initializing output scanners...')
+        
+        # Configure local models if needed
+        if self.use_local_models and not self._initialized:
+            self._configure_local_models()
+        
+        self._init_output_scanners()
+        self._output_scanners_initialized = True
+        logger.info('Output scanners initialized')
 
     def _configure_local_models(self):
         """Configure model paths and settings for local model usage with device optimization."""
@@ -198,35 +231,11 @@ class LLMGuardManager:
             # Get base path for local models
             models_base_path = os.environ.get('LLM_GUARD_MODELS_PATH', './models')
             
-            # Device-specific optimizations
-            device_kwargs = {}
-            if HAS_TORCH:
-                device_kwargs['device'] = self.device
-                
-                # MPS-specific optimizations for Apple Silicon
-                if self.device == 'mps':
-                    logger.info('Applying MPS optimizations for Apple Silicon')
-                    device_kwargs['device_map'] = None  # MPS doesn't support device_map
-                    # Enable reduced precision for faster inference on Apple Silicon
-                    if os.environ.get('MPS_ENABLE_FP16', 'true').lower() in ('1', 'true', 'yes', 'on'):
-                        device_kwargs['torch_dtype'] = torch.float16
-                        logger.info('Enabled FP16 (half precision) for MPS')
-                
-                # CUDA-specific optimizations
-                elif self.device == 'cuda':
-                    logger.info('Applying CUDA optimizations')
-                    device_kwargs['device_map'] = 'auto'
-                    # Enable TensorFloat32 for better performance on Ampere+ GPUs
-                    if torch.cuda.get_device_capability()[0] >= 8:
-                        torch.backends.cuda.matmul.allow_tf32 = True
-                        torch.backends.cudnn.allow_tf32 = True
-                        logger.info('Enabled TF32 for CUDA')
-                
-                # CPU-specific optimizations
-                else:
-                    logger.info('Applying CPU optimizations')
-                    # Enable JIT compilation for CPU
-                    device_kwargs['torchscript'] = True
+            # CPU-only configuration (torch dependency removed)
+            device_kwargs = {
+                'device': self.device  # Always 'cpu'
+            }
+            logger.info('Configuring models for CPU inference')
             
             # Configure Prompt Injection model
             if PROMPT_INJECTION_MODEL:
@@ -242,33 +251,19 @@ class LLMGuardManager:
                 DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].kwargs.update(device_kwargs)
                 logger.info(f'Configured Anonymize model path: {DEBERTA_AI4PRIVACY_v2_CONF["DEFAULT_MODEL"].path}')
             
-            # Configure Input Toxicity model
-            if INPUT_TOXICITY_MODEL:
-                INPUT_TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
-                INPUT_TOXICITY_MODEL.kwargs["local_files_only"] = True
-                INPUT_TOXICITY_MODEL.kwargs.update(device_kwargs)
-                logger.info(f'Configured input Toxicity model path: {INPUT_TOXICITY_MODEL.path}')
+            # Configure Toxicity model (used for both input and output)
+            if TOXICITY_MODEL:
+                TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
+                TOXICITY_MODEL.kwargs["local_files_only"] = True
+                TOXICITY_MODEL.kwargs.update(device_kwargs)
+                logger.info(f'Configured Toxicity model path: {TOXICITY_MODEL.path}')
             
-            # Configure Output Toxicity model
-            if OUTPUT_TOXICITY_MODEL:
-                OUTPUT_TOXICITY_MODEL.path = os.path.join(models_base_path, "unbiased-toxic-roberta")
-                OUTPUT_TOXICITY_MODEL.kwargs["local_files_only"] = True
-                OUTPUT_TOXICITY_MODEL.kwargs.update(device_kwargs)
-                logger.info(f'Configured output Toxicity model path: {OUTPUT_TOXICITY_MODEL.path}')
-            
-            # Configure Input Code model
-            if INPUT_CODE_MODEL:
-                INPUT_CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
-                INPUT_CODE_MODEL.kwargs["local_files_only"] = True
-                INPUT_CODE_MODEL.kwargs.update(device_kwargs)
-                logger.info(f'Configured input Code model path: {INPUT_CODE_MODEL.path}')
-            
-            # Configure Output Code model
-            if OUTPUT_CODE_MODEL:
-                OUTPUT_CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
-                OUTPUT_CODE_MODEL.kwargs["local_files_only"] = True
-                OUTPUT_CODE_MODEL.kwargs.update(device_kwargs)
-                logger.info(f'Configured output Code model path: {OUTPUT_CODE_MODEL.path}')
+            # Configure Code model (used for both input and output)
+            if CODE_MODEL:
+                CODE_MODEL.path = os.path.join(models_base_path, "programming-language-identification")
+                CODE_MODEL.kwargs["local_files_only"] = True
+                CODE_MODEL.kwargs.update(device_kwargs)
+                logger.info(f'Configured Code model path: {CODE_MODEL.path}')
             
             logger.info(f'Local model configuration completed for device: {self.device}')
             
@@ -298,7 +293,7 @@ class LLMGuardManager:
             self.input_scanners.append(
                 InputToxicity(
                     threshold=0.5,
-                    model=INPUT_TOXICITY_MODEL if self.use_local_models else None
+                    model=TOXICITY_MODEL if self.use_local_models else None
                 )
             )
             
@@ -310,7 +305,7 @@ class LLMGuardManager:
                 InputCode(
                     languages=code_language,
                     is_blocked=True,
-                    model=INPUT_CODE_MODEL if self.use_local_models else None
+                    model=CODE_MODEL if self.use_local_models else None
                 )
             )
             
@@ -350,14 +345,14 @@ class LLMGuardManager:
                 OutputBanSubstrings(["malicious", "dangerous"]),
                 OutputToxicity(
                     threshold=0.5,
-                    model=OUTPUT_TOXICITY_MODEL if self.use_local_models else None
+                    model=TOXICITY_MODEL if self.use_local_models else None
                 ),
                 MaliciousURLs(),
                 NoRefusal(),
                 OutputCode(
                     languages=code_language,
                     is_blocked=True,
-                    model=OUTPUT_CODE_MODEL if self.use_local_models else None
+                    model=CODE_MODEL if self.use_local_models else None
                 ),
             ]
             
@@ -459,6 +454,10 @@ class LLMGuardManager:
                 'error': str - Error message if block_on_error is True and scan failed
             }
         """
+        # Lazy initialization
+        if self.lazy_init:
+            self._ensure_input_scanners_initialized()
+        
         if not self.enable_input or not self.input_scanners:
             return {
                 "allowed": True,
@@ -504,6 +503,10 @@ class LLMGuardManager:
                 'error': str - Error message if block_on_error is True and scan failed
             }
         """
+        # Lazy initialization
+        if self.lazy_init:
+            self._ensure_output_scanners_initialized()
+        
         if not self.enable_output or not self.output_scanners:
             return {
                 "allowed": True,

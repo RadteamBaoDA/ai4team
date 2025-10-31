@@ -108,34 +108,18 @@ detect_platform() {
     return 0
 }
 
-# Check for MPS (Metal Performance Shaders) support
-check_mps_support() {
-    log_header "Checking MPS (Metal Performance Shaders) GPU Support..."
+# Check device support (GPU support removed - torch dependency eliminated)
+check_device_support() {
+    log_header "Checking Device Support..."
     
-    if [[ "$APPLE_SILICON" != "true" ]]; then
-        log_warn "MPS requires Apple Silicon (M1/M2/M3)"
-        export LLM_GUARD_DEVICE="cpu"
-        return 1
-    fi
+    # Always use CPU (torch dependency removed for Python 3.12 compatibility)
+    export LLM_GUARD_DEVICE="cpu"
     
-    # Check if Python and PyTorch are available
-    if [[ "$USE_VENV" == "true" ]] && [[ -f "$VENV_DIR/bin/python" ]]; then
-        PYTHON_CMD="$VENV_DIR/bin/python"
+    if [[ "$APPLE_SILICON" == "true" ]]; then
+        log_info "Running on Apple Silicon - CPU performance is excellent"
+        log_info "Note: GPU acceleration (MPS) disabled (torch removed for Python 3.12)"
     else
-        PYTHON_CMD="python3"
-    fi
-    
-    # Test MPS availability with Python
-    if $PYTHON_CMD -c "import torch; assert torch.backends.mps.is_available(); print('MPS available')" 2>/dev/null; then
-        log_info "MPS GPU is available and functional"
-        export LLM_GUARD_DEVICE="mps"
-        export PYTORCH_ENABLE_MPS_FALLBACK="1"
-        export MPS_ENABLE_FP16="true"
-        return 0
-    else
-        log_warn "MPS not available, falling back to CPU"
-        export LLM_GUARD_DEVICE="cpu"
-        return 1
+        log_info "Using CPU for ML inference"
     fi
     
     echo ""
@@ -206,8 +190,7 @@ setup_environment() {
     export MALLOC_MMAP_THRESHOLD_=131072
     export MALLOC_TRIM_THRESHOLD_=131072
     
-    # PyTorch optimizations
-    export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+    # Note: PyTorch optimizations removed (torch dependency eliminated for Python 3.12)
     
     # LLM Guard configuration
     export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-false}"
@@ -292,7 +275,7 @@ start_proxy() {
     
     # Platform detection and setup
     detect_platform || return 1
-    check_mps_support
+    check_device_support
     check_redis_connection
     setup_environment
     activate_venv || return 1
@@ -436,7 +419,7 @@ show_logs() {
 # Run in foreground
 run_foreground() {
     detect_platform || exit 1
-    check_mps_support
+    check_device_support
     check_redis_connection
     setup_environment
     activate_venv || exit 1

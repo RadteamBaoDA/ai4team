@@ -16,7 +16,8 @@ Features:
 import asyncio
 import logging
 import time
-import psutil
+import os
+import platform
 from typing import Dict, Optional, Any, Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -254,17 +255,59 @@ class ConcurrencyManager:
         - Threshold: >= 16GB -> 4, otherwise -> 1
         """
         try:
-            memory = psutil.virtual_memory()
-            available_gb = memory.available / (1024 ** 3)
+            # Try to get available memory using platform-specific methods
+            if platform.system() == "Linux":
+                # Read from /proc/meminfo on Linux
+                with open('/proc/meminfo', 'r') as f:
+                    meminfo = f.read()
+                    for line in meminfo.split('\n'):
+                        if line.startswith('MemAvailable:'):
+                            available_kb = int(line.split()[1])
+                            available_gb = available_kb / (1024 ** 2)
+                            parallel = 4 if available_gb >= 16 else 1
+                            logger.info(
+                                f"Auto-detected parallel limit: {parallel} "
+                                f"(available memory: {available_gb:.2f}GB)"
+                            )
+                            return parallel
+            elif platform.system() == "Darwin":  # macOS
+                # Use sysctl on macOS
+                import subprocess
+                result = subprocess.run(['sysctl', 'hw.memsize'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    total_bytes = int(result.stdout.split(':')[1].strip())
+                    total_gb = total_bytes / (1024 ** 3)
+                    # Assume 50% is available (rough estimate)
+                    available_gb = total_gb * 0.5
+                    parallel = 4 if available_gb >= 16 else 1
+                    logger.info(
+                        f"Auto-detected parallel limit: {parallel} "
+                        f"(estimated available memory: {available_gb:.2f}GB)"
+                    )
+                    return parallel
+            elif platform.system() == "Windows":
+                # Use wmic on Windows
+                import subprocess
+                result = subprocess.run(
+                    ['wmic', 'OS', 'get', 'FreePhysicalMemory'],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if len(lines) > 1:
+                        available_kb = int(lines[1].strip())
+                        available_gb = available_kb / (1024 ** 2)
+                        parallel = 4 if available_gb >= 16 else 1
+                        logger.info(
+                            f"Auto-detected parallel limit: {parallel} "
+                            f"(available memory: {available_gb:.2f}GB)"
+                        )
+                        return parallel
             
-            # Ollama-style: pick either 4 or 1
-            parallel = 4 if available_gb >= 16 else 1
-            
-            logger.info(
-                f"Auto-detected parallel limit: {parallel} "
-                f"(available memory: {available_gb:.2f}GB)"
-            )
-            return parallel
+            # Fallback if platform-specific detection fails
+            logger.info("Could not detect memory, using default parallel limit: 4")
+            return 4
         
         except Exception as e:
             logger.warning(f"Failed to auto-detect parallel limit: {e}. Using default 4.")
@@ -439,14 +482,94 @@ class ConcurrencyManager:
     def get_memory_info(self) -> Dict[str, Any]:
         """Get current memory information."""
         try:
-            memory = psutil.virtual_memory()
-            return {
-                "total_gb": round(memory.total / (1024 ** 3), 2),
-                "available_gb": round(memory.available / (1024 ** 3), 2),
-                "used_gb": round(memory.used / (1024 ** 3), 2),
-                "percent": memory.percent,
-                "recommended_parallel": self._detect_parallel_limit()
-            }
+            memory_info = {}
+            
+            if platform.system() == "Linux":
+                # Read from /proc/meminfo on Linux
+                with open('/proc/meminfo', 'r') as f:
+                    meminfo = {}
+                    for line in f:
+                        parts = line.split(':')
+                        if len(parts) == 2:
+                            key = parts[0].strip()
+                            value = parts[1].strip().split()[0]
+                            meminfo[key] = int(value)
+                    
+                    total_gb = meminfo.get('MemTotal', 0) / (1024 ** 2)
+                    available_gb = meminfo.get('MemAvailable', 0) / (1024 ** 2)
+                    free_gb = meminfo.get('MemFree', 0) / (1024 ** 2)
+                    used_gb = total_gb - available_gb
+                    
+                    memory_info = {
+                        "total_gb": round(total_gb, 2),
+                        "available_gb": round(available_gb, 2),
+                        "used_gb": round(used_gb, 2),
+                        "percent": round((used_gb / total_gb * 100) if total_gb > 0 else 0, 2),
+                        "recommended_parallel": self._detect_parallel_limit()
+                    }
+            
+            elif platform.system() == "Darwin":  # macOS
+                import subprocess
+                result = subprocess.run(['sysctl', 'hw.memsize'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    total_bytes = int(result.stdout.split(':')[1].strip())
+                    total_gb = total_bytes / (1024 ** 3)
+                    # Rough estimate: assume 50% used
+                    used_gb = total_gb * 0.5
+                    available_gb = total_gb - used_gb
+                    
+                    memory_info = {
+                        "total_gb": round(total_gb, 2),
+                        "available_gb": round(available_gb, 2),
+                        "used_gb": round(used_gb, 2),
+                        "percent": 50.0,
+                        "recommended_parallel": self._detect_parallel_limit()
+                    }
+            
+            elif platform.system() == "Windows":
+                import subprocess
+                # Get total memory
+                result_total = subprocess.run(
+                    ['wmic', 'ComputerSystem', 'get', 'TotalPhysicalMemory'],
+                    capture_output=True,
+                    text=True
+                )
+                # Get available memory
+                result_free = subprocess.run(
+                    ['wmic', 'OS', 'get', 'FreePhysicalMemory'],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result_total.returncode == 0 and result_free.returncode == 0:
+                    total_lines = result_total.stdout.strip().split('\n')
+                    free_lines = result_free.stdout.strip().split('\n')
+                    
+                    if len(total_lines) > 1 and len(free_lines) > 1:
+                        total_bytes = int(total_lines[1].strip())
+                        free_kb = int(free_lines[1].strip())
+                        
+                        total_gb = total_bytes / (1024 ** 3)
+                        available_gb = free_kb / (1024 ** 2)
+                        used_gb = total_gb - available_gb
+                        
+                        memory_info = {
+                            "total_gb": round(total_gb, 2),
+                            "available_gb": round(available_gb, 2),
+                            "used_gb": round(used_gb, 2),
+                            "percent": round((used_gb / total_gb * 100) if total_gb > 0 else 0, 2),
+                            "recommended_parallel": self._detect_parallel_limit()
+                        }
+            
+            if not memory_info:
+                # Fallback if no platform-specific method worked
+                memory_info = {
+                    "error": "Memory info not available for this platform",
+                    "recommended_parallel": 4
+                }
+            
+            return memory_info
+        
         except Exception as e:
             logger.error(f"Failed to get memory info: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "recommended_parallel": 4}

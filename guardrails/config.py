@@ -99,7 +99,16 @@ class Config:
 
     def get_list(self, key: str, default: Optional[List[str]] = None) -> List[str]:
         """Helper to get a list value."""
-        return self.get(key, default or [])
+        # Don't pass mutable default to cached get() - it's unhashable
+        result = self.get(key, None)
+        if result is None:
+            return default or []
+        if isinstance(result, list):
+            return result
+        # If it's a string from env var, split it
+        if isinstance(result, str):
+            return [item.strip() for item in result.split(',') if item.strip()]
+        return default or []
 
 # Example of how the new Config class would be used in ollama_guard_proxy.py
 # This is for demonstration and should not be run directly.

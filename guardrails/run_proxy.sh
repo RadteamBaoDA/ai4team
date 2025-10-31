@@ -61,7 +61,7 @@ LOG_LEVEL="${LOG_LEVEL:-info}"             # info, debug, warning, error
 RELOAD="${RELOAD:-false}"
 CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
 PROXY_MODULE="ollama_guard_proxy:app"
-LLM_GUARD_USE_LOCAL_MODELS="True"
+LLM_GUARD_USE_LOCAL_MODELS="False"
 
 # Command to execute (start, stop, restart, status, logs, run)
 COMMAND="${1:-help}"
@@ -79,7 +79,7 @@ export_variables() {
     export ENABLE_IP_FILTER="${ENABLE_IP_FILTER:-}"
     export IP_WHITELIST="${IP_WHITELIST:-}"
     export IP_BLACKLIST="${IP_BLACKLIST:-}"
-    export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-}"
+    export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-False}"
     
     # Cache configuration
     export CACHE_ENABLED="${CACHE_ENABLED:-true}"

@@ -53,17 +53,14 @@ from guard_manager import LLMGuardManager
 from concurrency import ConcurrencyManager
 logger = logging.getLogger(__name__)
 
-# Import performance monitoring and caching
+# Import caching
 try:
     from cache import GuardCache
-    from performance import get_monitor, record_request
-    from security import RateLimiter, InputValidator, SecurityHeadersMiddleware, rate_limit_middleware
-    HAS_OPTIMIZATIONS = True
+    HAS_CACHE = True
 except ImportError as e:
-    logger.warning(f'Performance optimizations not available: {e}')
-    HAS_OPTIMIZATIONS = False
+    logger.warning(f'Cache not available: {e}')
+    HAS_CACHE = False
     GuardCache = None
-    RateLimiter = None
 
 # Configure logging
 logging.basicConfig(
@@ -93,9 +90,12 @@ def get_http_client(max_pool: int = 100) -> httpx.AsyncClient:
 
 # Initialize app and components
 config = Config(os.environ.get('CONFIG_FILE'))
+
+# Initialize guard manager (scanners load at startup)
 guard_manager = LLMGuardManager(
     enable_input=config.get_bool('enable_input_guard', True),
     enable_output=config.get_bool('enable_output_guard', True),
+    lazy_init=False  # Scanners initialize at startup
 )
 
 # Initialize IP whitelist (nginx only)
@@ -116,12 +116,10 @@ else:
         auto_detect_parallel=False
     )
 
-# Initialize performance optimizations
+# Initialize cache
 guard_cache = None
-rate_limiter = None
-perf_monitor = None
 
-if HAS_OPTIMIZATIONS:
+if HAS_CACHE:
     # Initialize cache with Redis support
     cache_enabled = config.get_bool('cache_enabled', True)
     if cache_enabled:
@@ -137,21 +135,7 @@ if HAS_OPTIMIZATIONS:
             redis_max_connections=config.get_int('redis_max_connections', 50),
             redis_timeout=config.get_int('redis_timeout', 5),
         )
-        logger.info(f"Guard cache initialized: backend={guard_cache.backend}, ttl={guard_cache.ttl_seconds}s")
-    
-    # Initialize rate limiter
-    rate_limit_enabled = config.get_bool('rate_limit_enabled', True)
-    if rate_limit_enabled:
-        rate_limiter = RateLimiter(
-            requests_per_minute=config.get_int('rate_limit_per_minute', 60),
-            requests_per_hour=config.get_int('rate_limit_per_hour', 1000),
-            burst_size=config.get_int('rate_limit_burst', 10)
-        )
-        logger.info('Rate limiter initialized')
-    
-    # Initialize performance monitor
-    perf_monitor = get_monitor()
-    logger.info('Performance monitor initialized')
+        logger.info(f"Guard cache initialized: backend={guard_cache.backend}")
 
 app = FastAPI(
     title="Ollama Proxy with LLM Guard",
@@ -164,7 +148,7 @@ async def startup_event():
     # Initialize the client on startup
     get_http_client()
     # Initialize async components
-    if HAS_OPTIMIZATIONS and guard_cache:
+    if HAS_CACHE and guard_cache:
         await guard_cache.initialize()
 
 @app.on_event("shutdown")
@@ -172,15 +156,6 @@ async def shutdown_event():
     client = get_http_client()
     if client:
         await client.aclose()
-
-# Add security headers middleware
-if HAS_OPTIMIZATIONS:
-    app.add_middleware(SecurityHeadersMiddleware)
-    # Enable rate limiting if configured
-    if rate_limiter is not None:
-        # Wrap function-based middleware into class-based for FastAPI
-        from starlette.middleware.base import BaseHTTPMiddleware
-        app.add_middleware(BaseHTTPMiddleware, dispatch=rate_limit_middleware(rate_limiter))
 
 
 def extract_client_ip(request: Request) -> str:
@@ -325,12 +300,6 @@ async def log_requests(request: Request, call_next):
     finally:
         duration_ms = int((time.time() - start_ts) * 1000)
         logger.info("Response status: %s (%d ms)", locals().get('response', None).status_code if 'response' in locals() else 'n/a', duration_ms)
-        if HAS_OPTIMIZATIONS and perf_monitor is not None:
-            try:
-                # record_request(monitor, path, method, status_code, duration_ms)
-                record_request(perf_monitor, str(request.url.path), request.method, int(locals().get('response', None).status_code if 'response' in locals() else 0), duration_ms)
-            except Exception:
-                pass
 
 
 async def safe_json(response: httpx.Response) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -391,13 +360,13 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
         # Input guard with cache
         if config.get('enable_input_guard', True) and prompt:
             input_result = None
-            if HAS_OPTIMIZATIONS and guard_cache:
+            if HAS_CACHE and guard_cache:
                 input_result = await guard_cache.get_input_result(prompt)
                 if input_result:
                     logger.debug("Input scan cache hit")
             if not input_result:
                 input_result = await guard_manager.scan_input(prompt, block_on_error=config.get('block_on_guard_error', False))
-                if HAS_OPTIMIZATIONS and guard_cache:
+                if HAS_CACHE and guard_cache:
                     try:
                         await guard_cache.set_input_result(prompt, input_result)
                     except Exception:
@@ -445,13 +414,13 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
         if config.get('enable_output_guard', True):
             output_text = extract_text_from_response(data)
             output_result = None
-            if output_text and HAS_OPTIMIZATIONS and guard_cache:
+            if output_text and HAS_CACHE and guard_cache:
                 output_result = await guard_cache.get_output_result(output_text)
                 if output_result:
                     logger.debug("Output scan cache hit")
             if output_result is None:
                 output_result = await guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
-                if output_text and HAS_OPTIMIZATIONS and guard_cache:
+                if output_text and HAS_CACHE and guard_cache:
                     try:
                         await guard_cache.set_output_result(output_text, output_result)
                     except Exception:
@@ -931,7 +900,7 @@ async def proxy_chat(request: Request):
         # Scan input with cache
         if config.get('enable_input_guard', True) and prompt:
             input_result = None
-            if HAS_OPTIMIZATIONS and guard_cache:
+            if HAS_CACHE and guard_cache:
                 input_result = await guard_cache.get_input_result(prompt)
                 if input_result:
                     logger.debug("Input scan cache hit")
@@ -940,7 +909,7 @@ async def proxy_chat(request: Request):
                     prompt,
                     block_on_error=config.get('block_on_guard_error', False)
                 )
-                if HAS_OPTIMIZATIONS and guard_cache:
+                if HAS_CACHE and guard_cache:
                     try:
                         await guard_cache.set_input_result(prompt, input_result)
                     except Exception:
@@ -1074,13 +1043,13 @@ async def openai_chat_completions(request: Request):
     async def process_openai_chat():
         if config.get('enable_input_guard', True) and prompt_text:
             input_result = None
-            if HAS_OPTIMIZATIONS and guard_cache:
+            if HAS_CACHE and guard_cache:
                 input_result = await guard_cache.get_input_result(prompt_text)
                 if input_result:
                     logger.debug("Input scan cache hit")
             if not input_result:
                 input_result = await guard_manager.scan_input(prompt_text, block_on_error=config.get('block_on_guard_error', False))
-                if HAS_OPTIMIZATIONS and guard_cache:
+                if HAS_CACHE and guard_cache:
                     try:
                         await guard_cache.set_input_result(prompt_text, input_result)
                     except Exception:
@@ -1168,13 +1137,13 @@ async def openai_chat_completions(request: Request):
 
         if config.get('enable_output_guard', True) and output_text:
             output_result = None
-            if HAS_OPTIMIZATIONS and guard_cache:
+            if HAS_CACHE and guard_cache:
                 output_result = await guard_cache.get_output_result(output_text)
                 if output_result:
                     logger.debug("Output scan cache hit")
             if output_result is None:
                 output_result = await guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
-                if HAS_OPTIMIZATIONS and guard_cache:
+                if HAS_CACHE and guard_cache:
                     try:
                         await guard_cache.set_output_result(output_text, output_result)
                     except Exception:
@@ -1340,13 +1309,13 @@ async def openai_completions(request: Request):
 
     if config.get('enable_output_guard', True) and output_text:
         output_result = None
-        if HAS_OPTIMIZATIONS and guard_cache:
+        if HAS_CACHE and guard_cache:
             output_result = await guard_cache.get_output_result(output_text)
             if output_result:
                 logger.debug("Output scan cache hit")
         if output_result is None:
             output_result = await guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
-            if HAS_OPTIMIZATIONS and guard_cache:
+            if HAS_CACHE and guard_cache:
                 try:
                     await guard_cache.set_output_result(output_text, output_result)
                 except Exception:
@@ -1629,15 +1598,8 @@ async def health_check():
         health_data['device'] = guard_manager.device
     
     # Add cache stats if available
-    if HAS_OPTIMIZATIONS and guard_cache:
+    if HAS_CACHE and guard_cache:
         health_data['cache'] = await guard_cache.get_stats()
-    
-    # Add performance summary if available
-    if HAS_OPTIMIZATIONS and perf_monitor:
-        try:
-            health_data['performance'] = perf_monitor.get_summary()
-        except Exception as e:
-            logger.error(f'Failed to get performance metrics: {e}')
     
     return health_data
 
@@ -1661,11 +1623,9 @@ async def get_config():
     safe_config['nginx_whitelist'] = {'enabled': wl['enabled'], 'count': wl['count']}
     
     # Add optimization status
-    if HAS_OPTIMIZATIONS:
+    if HAS_CACHE:
         safe_config['optimizations'] = {
             'cache_enabled': guard_cache is not None and guard_cache.enabled,
-            'rate_limiting': rate_limiter is not None,
-            'monitoring': perf_monitor is not None,
         }
         
         # Add device info
@@ -1673,19 +1633,6 @@ async def get_config():
             safe_config['device'] = guard_manager.device
     
     return safe_config
-
-
-@app.get("/metrics")
-async def get_metrics():
-    """Get detailed performance metrics."""
-    if not HAS_OPTIMIZATIONS or not perf_monitor:
-        return {"error": "Performance monitoring not available"}
-    
-    try:
-        return perf_monitor.get_all_metrics()
-    except Exception as e:
-        logger.error(f'Failed to get metrics: {e}')
-        raise HTTPException(status_code=500, detail={"error": "Failed to retrieve metrics"})
 
 
 @app.get("/stats")
@@ -1701,18 +1648,10 @@ async def get_stats():
         "whitelist": ip_whitelist.get_stats(),
     }
     
-    if HAS_OPTIMIZATIONS:
+    if HAS_CACHE:
         # Cache stats
         if guard_cache:
             stats['cache'] = await guard_cache.get_stats()
-        
-        # Performance stats
-        if perf_monitor:
-            try:
-                stats['performance'] = perf_monitor.get_summary()
-                stats['requests'] = perf_monitor.get_request_metrics()
-            except Exception as e:
-                logger.error(f'Failed to get performance stats: {e}')
     
     return stats
 
@@ -1720,7 +1659,7 @@ async def get_stats():
 @app.post("/admin/cache/clear")
 async def clear_cache():
     """Clear the cache (admin endpoint)."""
-    if not HAS_OPTIMIZATIONS or not guard_cache:
+    if not HAS_CACHE or not guard_cache:
         return {"error": "Cache not available"}
     
     await guard_cache.clear()
@@ -1730,7 +1669,7 @@ async def clear_cache():
 @app.post("/admin/cache/cleanup")
 async def cleanup_cache():
     """Clean up expired cache entries."""
-    if not HAS_OPTIMIZATIONS or not guard_cache:
+    if not HAS_CACHE or not guard_cache:
         return {"error": "Cache not available"}
     
     removed = await guard_cache.cleanup_expired()
