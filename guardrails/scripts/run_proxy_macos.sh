@@ -19,21 +19,22 @@ set -euo pipefail
 
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$SCRIPT_DIR/logs"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/logs"
 PID_FILE="$LOG_DIR/proxy.pid"
 LOG_FILE="$LOG_DIR/proxy_macos.log"
-CACHE_DIR="$SCRIPT_DIR/cache"
-MODELS_DIR="$SCRIPT_DIR/models"
+CACHE_DIR="$PROJECT_ROOT/cache"
+MODELS_DIR="$PROJECT_ROOT/models"
 
 # Virtual environment
-VENV_DIR="${VENV_DIR:-./venv}"
+VENV_DIR="${VENV_DIR:-$PROJECT_ROOT/venv}"
 USE_VENV="${USE_VENV:-true}"
 
 # Proxy configuration
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8080}"
-CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
-PROXY_MODULE="ollama_guard_proxy:app"
+CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/config/config.yaml}"
+PROXY_MODULE="src.ollama_guard_proxy:app"
 
 # Detect CPU cores for optimal worker count
 if command -v sysctl &> /dev/null; then

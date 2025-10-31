@@ -42,15 +42,19 @@
 
 set -euo pipefail
 
-# Get script directory
+# Get script directory (scripts/) and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/logs"
 PID_FILE="$LOG_DIR/proxy.pid"
 LOG_FILE="$LOG_DIR/proxy.log"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
+# Create log directory
+mkdir -p "$LOG_DIR"
+
 # Virtual environment setup
-VENV_DIR="${VENV_DIR:-./venv}"
+VENV_DIR="${VENV_DIR:-$PROJECT_ROOT/venv}"
 VENV_ACTIVATE="$VENV_DIR/bin/activate"
 USE_VENV="${USE_VENV:-true}"
 
@@ -59,10 +63,10 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-9999}"
 LOG_LEVEL="${LOG_LEVEL:-info}"             # info, debug, warning, error
 RELOAD="${RELOAD:-false}"
-CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
-PROXY_MODULE="ollama_guard_proxy:app"
-LLM_GUARD_USE_LOCAL_MODELS="TRUE"
-
+CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/config/config.yaml}"
+PROXY_MODULE="src.ollama_guard_proxy:app"
+LLM_GUARD_USE_LOCAL_MODELS="True"
+SCAN_FAIL_FAST="True"
 # Command to execute (start, stop, restart, status, logs, run)
 COMMAND="${1:-help}"
 shift 1 >/dev/null 2>&1 || true
@@ -80,6 +84,7 @@ export_variables() {
     export IP_WHITELIST="${IP_WHITELIST:-}"
     export IP_BLACKLIST="${IP_BLACKLIST:-}"
     export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-True}"
+    export SCAN_FAIL_FAST="${SCAN_FAIL_FAST:-True}"
     
     # Cache configuration
     export CACHE_ENABLED="${CACHE_ENABLED:-true}"
@@ -104,8 +109,8 @@ export_variables() {
 # Function to run the uvicorn server
 run_server() {
     # Set working directory and Python path
-    cd "$SCRIPT_DIR"
-    export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
+    cd "$PROJECT_ROOT"
+    export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
     # Activate virtual environment if enabled
     if [ "$USE_VENV" = "true" ] && [ -f "$VENV_ACTIVATE" ]; then
@@ -379,8 +384,8 @@ run_interactive() {
   echo "Starting Ollama Guard Proxy in foreground..."
 
   # --- Pre-run Checks ---
-  cd "$SCRIPT_DIR"
-  export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
+  cd "$PROJECT_ROOT"
+  export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
   # 1. Check for Python
   PYTHON_CMD=$(command -v python3 || command -v python)

@@ -27,7 +27,7 @@ try:
         Code as OutputCode,
     )
     from llm_guard.vault import Vault
-    from llm_guard import scan_prompt
+    from llm_guard import scan_prompt, scan_output
     
     # Import model configurations for local model support (optional - may not exist in all versions)
     # Use same models for both input and output scanners
@@ -68,10 +68,11 @@ except ImportError as e:
     OutputBanSubstrings = OutputToxicity = MaliciousURLs = NoRefusal = OutputCode = None
     Vault = None
     scan_prompt = None
+    scan_output = None
     # Model configuration placeholders
     DEBERTA_AI4PRIVACY_v2_CONF = None
     CODE_MODEL = PROMPT_INJECTION_MODEL = TOXICITY_MODEL = None
-
+ 
 
 class LLMGuardManager:
     def __init__(self, enable_input: bool = True, enable_output: bool = True, enable_anonymize: bool = True, lazy_init: bool = True):
@@ -91,7 +92,7 @@ class LLMGuardManager:
         self.enable_output = enable_output and HAS_LLM_GUARD
         self.enable_anonymize = enable_anonymize and HAS_LLM_GUARD
         self.lazy_init = lazy_init
-        
+        self.scan_fail_fast = os.environ.get('LLM_GUARD_FAST_FAIL', 'true').lower() in ('1', 'true', 'yes', 'on')
         # Lazy initialization flags
         self._initialized = False
         self._input_scanners_initialized = False
@@ -349,9 +350,9 @@ class LLMGuardManager:
             self.input_scanners = []
 
     def _init_output_scanners(self):
-        """Initialize output scanners using scan_prompt."""
+        """Initialize output scanners for use with scan_output function."""
         try:
-            # Create scanners as a simple list for use with scan function
+            # Create scanners as a simple list for use with scan_output function
             self.output_scanners = [
                 OutputBanSubstrings(["malicious", "dangerous"]),
                 OutputToxicity(
@@ -367,7 +368,7 @@ class LLMGuardManager:
                 ),
             ]
             
-            logger.info('Output scanners initialized: %d scanners ready for scan (local_models: %s)', 
+            logger.info('Output scanners initialized: %d scanners ready for scan_output (local_models: %s)', 
                        len(self.output_scanners), self.use_local_models)
         except Exception as e:
             logger.exception('Failed to init output scanners: %s', e)
@@ -387,7 +388,8 @@ class LLMGuardManager:
             sanitized_prompt, results_valid, results_score = await run_in_threadpool(
                 scan_prompt,
                 self.input_scanners,
-                prompt
+                prompt,
+                self.scan_fail_fast
             )
             
             # Convert results to expected format
@@ -412,48 +414,45 @@ class LLMGuardManager:
 
     async def _run_output_scanners(self, text: str, prompt: str = "") -> Tuple[str, bool, Dict[str, Any]]:
         """
-        Run all output scanners on the text in a thread pool.
+        Run all output scanners on the text using scan_output function.
         
+        Uses the official scan_output method from llm-guard library (similar to scan_prompt).
         Output scanners require both prompt and output text.
-        Each scanner is called with scan(prompt, output) method.
         Returns (sanitized_text, is_valid, scan_results)
         """
+        if not self.output_scanners or not scan_output:
+            return text, True, {}
         
-        def sync_scan():
-            sanitized_text = text
-            all_valid = True
+        try:
+            # Use scan_output with output scanners in a thread pool
+            # Signature: scan_output(scanners, prompt, output, fail_fast)
+            sanitized_output, results_valid, results_score = await run_in_threadpool(
+                scan_output,
+                self.output_scanners,
+                prompt,
+                text,
+                self.scan_fail_fast
+            )
+            
+            # Convert results to expected format
             scan_results = {}
-            
-            for scanner in self.output_scanners:
-                scanner_name = scanner.__class__.__name__
+            for scanner_name, is_valid in results_valid.items():
+                risk_score = results_score.get(scanner_name, 0.0)
+                scan_results[scanner_name] = {
+                    'passed': is_valid,
+                    'risk_score': risk_score,
+                    'sanitized': sanitized_output != text
+                }
                 
-                try:
-                    # Output scanners require scan(prompt, output) signature
-                    # If no prompt provided, use empty string
-                    sanitized_text, is_valid, risk_score = scanner.scan(prompt, sanitized_text)
-                    
-                    scan_results[scanner_name] = {
-                        'passed': is_valid,
-                        'risk_score': risk_score,
-                        'sanitized': sanitized_text != text
-                    }
-                    
-                    if not is_valid:
-                        all_valid = False
-                        logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score}')
-                        
-                except Exception as e:
-                    logger.exception(f'Error running output scanner {scanner_name}: %s', e)
-                    scan_results[scanner_name] = {
-                        'passed': False,
-                        'error': str(e),
-                        'sanitized': False
-                    }
-                    all_valid = False
+                if not is_valid:
+                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score}')
             
-            return sanitized_text, all_valid, scan_results
-
-        return await run_in_threadpool(sync_scan)
+            all_valid = all(results_valid.values())
+            return sanitized_output, all_valid, scan_results
+            
+        except Exception as e:
+            logger.exception('Error running output scanners with scan_output: %s', e)
+            return text, False, {'error': str(e)}
 
     async def scan_input(self, prompt: str, block_on_error: bool = False) -> Dict[str, Any]:
         """

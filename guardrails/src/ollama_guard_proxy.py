@@ -123,17 +123,15 @@ if HAS_CACHE:
         )
         logger.info(f"Guard cache initialized: backend={guard_cache.backend}")
 
-# Create FastAPI app
-app = FastAPI(
-    title="Ollama Proxy with LLM Guard",
-    description="Secure proxy for Ollama with LLM Guard integration - Modular Architecture",
-    default_response_class=ORJSONResponse,
-)
+# Lifespan context manager for startup and shutdown events
+from contextlib import asynccontextmanager
 
-
-@app.lifespan("startup")
-async def startup_event():
-    """Initialize async components on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
+    logger.info("Application starting up...")
+    
     # Initialize the HTTP client on startup
     get_http_client()
     
@@ -147,13 +145,22 @@ async def startup_event():
     logger.info(f"Output guard: {'enabled' if config.get_bool('enable_output_guard', True) else 'disabled'}")
     logger.info(f"Cache: {'enabled' if guard_cache else 'disabled'}")
     logger.info(f"IP whitelist: {'enabled' if ip_whitelist.get_stats()['enabled'] else 'disabled'}")
-
-
-@app.lifespan("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
+    
+    yield
+    
+    # Shutdown
+    logger.info("Application shutting down...")
     await close_http_client()
     logger.info("Application shutdown complete")
+
+
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title="Ollama Proxy with LLM Guard",
+    description="Secure proxy for Ollama with LLM Guard integration - Modular Architecture",
+    default_response_class=ORJSONResponse,
+    lifespan=lifespan,
+)
 
 
 @app.middleware("http")

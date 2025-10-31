@@ -43,9 +43,11 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY *.py ./
-COPY config.yaml ./config.yaml 2>/dev/null || true
+# Copy application files in new structure
+COPY main.py .
+COPY src/ ./src/
+COPY config/ ./config/
+COPY requirements.txt .
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/logs /app/models /app/cache && \
@@ -96,11 +98,4 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=5 \
 
 # Optimized startup command with uvicorn
 # Using multiple workers for better concurrency on multi-core Apple Silicon
-CMD ["python", "-m", "uvicorn", "ollama_guard_proxy:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8080", \
-     "--workers", "8", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--log-level", "info", \
-     "--access-log", \
-     "--use-colors"]
+CMD ["python", "main.py"]

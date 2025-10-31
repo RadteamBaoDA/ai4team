@@ -32,9 +32,11 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     fi && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY *.py .
-COPY config.yaml ./config.yaml 2>/dev/null || true
+# Copy application files in new structure
+COPY main.py .
+COPY src/ ./src/
+COPY config/ ./config/
+COPY requirements.txt .
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/models
@@ -69,7 +71,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the proxy with uvicorn for better performance
-CMD ["python", "-m", "uvicorn", "ollama_guard_proxy:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8080", \
-     "--log-level", "info"]
+CMD ["python", "main.py"]

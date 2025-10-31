@@ -34,6 +34,10 @@ REM   - Nginx-only access control
 
 setlocal enabledelayedexpansion
 
+REM Get script directory and project root
+set "SCRIPT_DIR=%~dp0"
+set "PROJECT_ROOT=%SCRIPT_DIR%.."
+
 REM Default configuration
 set "HOST=0.0.0.0"
 set "PORT=8080"
@@ -41,11 +45,11 @@ set "WORKERS=4"
 set "CONCURRENCY=128"
 set "LOG_LEVEL=info"
 set "RELOAD=false"
-set "CONFIG_FILE=config.yaml"
-set "PROXY_MODULE=ollama_guard_proxy:app"
+set "CONFIG_FILE=%PROJECT_ROOT%\config\config.yaml"
+set "PROXY_MODULE=src.ollama_guard_proxy:app"
 
 REM Virtual environment setup
-if not defined VENV_DIR set "VENV_DIR=venv"
+if not defined VENV_DIR set "VENV_DIR=%PROJECT_ROOT%\venv"
 if not defined USE_VENV set "USE_VENV=true"
 set "VENV_ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 
