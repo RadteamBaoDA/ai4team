@@ -17,9 +17,9 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from http_client import forward_request, safe_json, get_http_client
-from utils import extract_model_from_payload, extract_text_from_payload, extract_text_from_response
-from language import LanguageDetector
+from .http_client import forward_request, safe_json, get_http_client
+from .utils import extract_model_from_payload, extract_text_from_payload, extract_text_from_response
+from .language import LanguageDetector
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
     """
     
     # Import streaming handlers
-    from streaming_handlers import create_streaming_handlers
+    from .streaming_handlers import create_streaming_handlers
     stream_response_with_guard = create_streaming_handlers(config, guard_manager)
     
     @router.post("/api/generate")

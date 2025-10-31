@@ -18,14 +18,14 @@ from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from http_client import forward_request, safe_json, get_http_client
-from utils import (
+from .http_client import forward_request, safe_json, get_http_client
+from .utils import (
     extract_prompt_from_completion_payload, 
     extract_text_from_response,
     combine_messages_text,
     build_ollama_options_from_openai_payload
 )
-from language import LanguageDetector
+from .language import LanguageDetector
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
     """
     
     # Import streaming handlers
-    from streaming_handlers import stream_openai_chat_response, stream_openai_completion_response
+    from .streaming_handlers import stream_openai_chat_response, stream_openai_completion_response
     
     @router.post("/v1/chat/completions")
     async def openai_chat_completions(request: Request):

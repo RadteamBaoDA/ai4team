@@ -37,23 +37,23 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, ORJSONResponse
 import uvicorn
 
-from config import Config
-from ip_whitelist import IPWhitelist
-from guard_manager import LLMGuardManager
-from concurrency import ConcurrencyManager
-from http_client import get_http_client, close_http_client
-from utils import extract_client_ip
+from .config import Config
+from .ip_whitelist import IPWhitelist
+from .guard_manager import LLMGuardManager
+from .concurrency import ConcurrencyManager
+from .http_client import get_http_client, close_http_client
+from .utils import extract_client_ip
 
 # Import endpoint modules
-from endpoints_ollama import create_ollama_endpoints
-from endpoints_openai import create_openai_endpoints
-from endpoints_admin import create_admin_endpoints
+from .endpoints_ollama import create_ollama_endpoints
+from .endpoints_openai import create_openai_endpoints
+from .endpoints_admin import create_admin_endpoints
 
 logger = logging.getLogger(__name__)
 
 # Import caching
 try:
-    from cache import GuardCache
+    from .cache import GuardCache
     HAS_CACHE = True
 except ImportError as e:
     logger.warning(f'Cache not available: {e}')

@@ -93,6 +93,7 @@ class LLMGuardManager:
         self.enable_anonymize = enable_anonymize and HAS_LLM_GUARD
         self.lazy_init = lazy_init
         self.scan_fail_fast = os.environ.get('LLM_GUARD_FAST_FAIL', 'true').lower() in ('1', 'true', 'yes', 'on')
+        logger.info(f'Fast fail enabled: {self.scan_fail_fast}')
         # Lazy initialization flags
         self._initialized = False
         self._input_scanners_initialized = False

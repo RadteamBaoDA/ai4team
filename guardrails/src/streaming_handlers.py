@@ -15,7 +15,7 @@ from typing import Dict, Any
 
 import httpx
 
-from language import LanguageDetector
+from .language import LanguageDetector
 
 logger = logging.getLogger(__name__)
 
