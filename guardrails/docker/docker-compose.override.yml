@@ -1,0 +1,181 @@
+version: '3.8'
+
+# Docker Compose Override for Development
+# This file extends docker-compose.yml with development-specific configurations
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+
+services:
+  ollama-guard-proxy:
+    # Development build with cache mount for faster rebuilds
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: base
+      cache_from:
+        - ollama-guard-proxy:latest
+    
+    # Development environment variables
+    environment:
+      # Enable debug mode
+      - DEBUG=true
+      - DEV_MODE=true
+      - LOG_LEVEL=DEBUG
+      
+      # Relaxed rate limits for development
+      - RATE_LIMIT_PER_MINUTE=300
+      - RATE_LIMIT_PER_HOUR=10000
+      - RATE_LIMIT_BURST=50
+      
+      # Development-friendly settings
+      - BLOCK_ON_GUARD_ERROR=false
+      - ENABLE_QUEUE_STATS=true
+      
+      # Hot reload for development (if using uvicorn)
+      - UVICORN_RELOAD=true
+      - UVICORN_RELOAD_DIRS=/app/src
+      
+    # Mount source code for development
+    volumes:
+      - ../src:/app/src:rw
+      - ../config:/app/config:rw  
+      - ../logs:/app/logs:rw
+      - ../models:/app/models:rw
+      - ../tests:/app/tests:rw
+      - dev_cache:/app/cache
+      
+    # Development command with hot reload
+    command: ["python", "-m", "ollama_guardrails", "server", "--reload"]
+    
+    # Development ports (can expose additional debug ports)
+    ports:
+      - "8080:8080"   # Main API
+      - "8000:8000"   # Alternative port for testing
+      
+    # Development dependencies
+    depends_on:
+      - redis
+      - ollama
+      
+    # Development resource limits (lower for local dev)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis with development settings
+  redis:
+    # Development Redis configuration
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --loglevel notice
+      
+    # Expose Redis port for development tools
+    ports:
+      - "127.0.0.1:6379:6379"
+      
+    # Development volume for data persistence
+    volumes:
+      - dev_redis_data:/data
+      
+  # Ollama with development settings  
+  ollama:
+    # Development environment
+    environment:
+      - OLLAMA_DEBUG=true
+      - OLLAMA_VERBOSE=1
+      - OLLAMA_ORIGINS=*
+      
+    # Expose Ollama port for direct access
+    ports:
+      - "127.0.0.1:11434:11434"
+      
+    # Development volume
+    volumes:
+      - dev_ollama_data:/root/.ollama
+
+  # Redis Commander for development (Web UI)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ollama-redis-commander-dev
+    hostname: redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=dev123
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - ollama_network
+    profiles:
+      - dev
+
+  # Prometheus for monitoring (development)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ollama-prometheus-dev
+    hostname: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - dev_prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - ollama_network
+    profiles:
+      - monitoring
+
+  # Grafana for monitoring dashboards (development)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ollama-grafana-dev
+    hostname: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=dev123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - dev_grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - ollama_network
+    profiles:
+      - monitoring
+
+volumes:
+  # Development-specific volumes
+  dev_redis_data:
+    driver: local
+  dev_ollama_data:
+    driver: local  
+  dev_cache:
+    driver: local
+  dev_prometheus_data:
+    driver: local
+  dev_grafana_data:
+    driver: local
+
+networks:
+  # Use the same network as main compose
+  ollama_network:
+    external: true

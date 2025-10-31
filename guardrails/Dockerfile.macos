@@ -39,15 +39,21 @@ RUN pip install --no-cache-dir \
     torch==2.1.0 \
     --index-url https://download.pytorch.org/whl/cpu
 
+# Copy Python project configuration first for better layer caching
+COPY pyproject.toml setup.py MANIFEST.in ./
+COPY requirements.txt ./
+
 # Copy and install Python dependencies
-COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files in new structure
-COPY main.py .
+# Copy application source code in proper package structure  
+COPY main.py ./
 COPY src/ ./src/
 COPY config/ ./config/
-COPY requirements.txt .
+
+# Install the package in editable mode for development
+# This ensures proper Python package structure and importability
+RUN pip install --no-cache-dir -e .
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/logs /app/models /app/cache && \
@@ -57,6 +63,7 @@ RUN mkdir -p /app/logs /app/models /app/cache && \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONHASHSEED=random \
+    PYTHONPATH=/app/src \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # ARM64/Apple Silicon optimizations
@@ -70,7 +77,10 @@ ENV PYTHONUNBUFFERED=1 \
     # LLM Guard configuration
     LLM_GUARD_DEVICE=cpu \
     LLM_GUARD_USE_LOCAL_MODELS=false \
-    LLM_GUARD_MODELS_PATH=/app/models \
+    # Default configuration
+    PROXY_HOST=0.0.0.0 \
+    PROXY_PORT=8080 \
+    CONFIG_FILE=/app/config/config.yaml \
     # Enable MPS when available (for native macOS execution)
     MPS_ENABLE_FP16=true \
     # Security settings
@@ -96,6 +106,11 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=15s --start-period=90s --retries=5 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Optimized startup command with uvicorn
-# Using multiple workers for better concurrency on multi-core Apple Silicon
-CMD ["python", "main.py"]
+# Use the proper entry point - optimized for Apple Silicon
+# Multiple options for flexibility:
+# Option 1: Direct module execution (recommended)
+CMD ["python", "-m", "ollama_guardrails", "server"]
+# Option 2: Via main.py (fallback)
+# CMD ["python", "main.py"]
+# Option 3: Via uvicorn directly with Apple Silicon optimizations
+# CMD ["uvicorn", "ollama_guardrails.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]
