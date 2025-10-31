@@ -74,6 +74,7 @@ shift 1 >/dev/null 2>&1 || true
 # Function to export all necessary environment variables
 export_variables() {
     # Export environment variables
+    export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH:-}"
     export OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
     export PROXY_PORT="$PORT"
     export CONFIG_FILE="$CONFIG_FILE"
@@ -110,7 +111,6 @@ export_variables() {
 run_server() {
     # Set working directory and Python path
     cd "$PROJECT_ROOT"
-    export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
     # Activate virtual environment if enabled
     if [ "$USE_VENV" = "true" ] && [ -f "$VENV_ACTIVATE" ]; then
@@ -172,7 +172,7 @@ start_proxy() {
     export VENV_ACTIVATE='$VENV_ACTIVATE'
     export USE_VENV='$USE_VENV'
     export CONFIG_FILE='$CONFIG_FILE'
-    export PYTHONPATH='$PROJECT_ROOT'
+    export PYTHONPATH='$PROJECT_ROOT/src'
     
     # Activate virtual environment if enabled
     if [ \"\$USE_VENV\" = \"true\" ] && [ -f \"\$VENV_ACTIVATE\" ]; then
@@ -413,7 +413,6 @@ run_interactive() {
 
   # --- Pre-run Checks ---
   cd "$PROJECT_ROOT"
-  export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
   # 1. Check for Python
   PYTHON_CMD=$(command -v python3 || command -v python)
