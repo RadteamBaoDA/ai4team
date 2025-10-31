@@ -43,8 +43,6 @@ else
 fi
 
 # Apple Silicon optimizations
-WORKERS="${WORKERS:-$CPU_CORES}"
-CONCURRENCY="${CONCURRENCY:-256}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 # Colors for output
@@ -229,6 +227,11 @@ setup_environment() {
     export REDIS_PASSWORD="${REDIS_PASSWORD:-}"
     export REDIS_MAX_CONNECTIONS="${REDIS_MAX_CONNECTIONS:-50}"
     
+    # Concurrency configuration (Ollama-style)
+    export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-auto}"
+    export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-512}"
+    export REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-300}"
+    
     # Proxy configuration
     export OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
     export PROXY_PORT="$PORT"
@@ -236,8 +239,8 @@ setup_environment() {
     
     log_info "Environment configured for Apple Silicon"
     log_info "Device: ${LLM_GUARD_DEVICE}"
-    log_info "Workers: $WORKERS"
     log_info "Threads per worker: $CPU_CORES"
+    log_info "Concurrency: Parallel=${OLLAMA_NUM_PARALLEL}, Queue=${OLLAMA_MAX_QUEUE}"
     
     echo ""
 }
@@ -300,10 +303,8 @@ start_proxy() {
     nohup uvicorn $PROXY_MODULE \
         --host $HOST \
         --port $PORT \
-        --workers $WORKERS \
         --log-level $LOG_LEVEL \
-        --limit-concurrency $CONCURRENCY \
-        --backlog 2048 \
+        --forwarded-allow-ips="*" \
         --timeout-keep-alive 5 \
         > "$LOG_FILE" 2>&1 &
     
@@ -382,9 +383,9 @@ status_proxy() {
         echo "Configuration:"
         echo "  Host: $HOST"
         echo "  Port: $PORT"
-        echo "  Workers: $WORKERS"
         echo "  Device: ${LLM_GUARD_DEVICE:-auto}"
         echo "  Cache: ${CACHE_BACKEND:-auto} (TTL: ${CACHE_TTL:-3600}s)"
+        echo "  Concurrency: ${OLLAMA_NUM_PARALLEL:-auto} parallel, ${OLLAMA_MAX_QUEUE:-512} queue"
         echo "  Log: $LOG_FILE"
         echo ""
         
@@ -447,10 +448,9 @@ run_foreground() {
     echo "Configuration:"
     echo "  Host: $HOST"
     echo "  Port: $PORT"
-    echo "  Workers: $WORKERS (optimized for $CPU_CORES cores)"
     echo "  Device: ${LLM_GUARD_DEVICE}"
-    echo "  Concurrency: $CONCURRENCY"
     echo "  Log Level: $LOG_LEVEL"
+    echo "  Concurrency: ${OLLAMA_NUM_PARALLEL:-auto} parallel, ${OLLAMA_MAX_QUEUE:-512} queue"
     echo ""
     log_info "Starting Uvicorn server... (Press Ctrl+C to stop)"
     echo ""
@@ -458,10 +458,8 @@ run_foreground() {
     exec uvicorn $PROXY_MODULE \
         --host $HOST \
         --port $PORT \
-        --workers $WORKERS \
         --log-level $LOG_LEVEL \
-        --limit-concurrency $CONCURRENCY \
-        --backlog 2048 \
+        --forwarded-allow-ips="*" \
         --timeout-keep-alive 5 \
         --access-log \
         --use-colors
@@ -526,6 +524,15 @@ case "$COMMAND" in
         echo "  REDIS_PASSWORD              - Redis password (default: empty)"
         echo "  REDIS_DB                    - Redis database number (default: 0)"
         echo "  REDIS_MAX_CONNECTIONS       - Max connections (default: 50)"
+        echo ""
+        echo "Concurrency Variables (Ollama-style):"
+        echo "  OLLAMA_NUM_PARALLEL         - Max parallel requests per model"
+    echo "                                'auto' selects 4 if >=16GB free RAM else 1; or set 1,2,4,8"
+        echo "                                (default: auto)"
+        echo "  OLLAMA_MAX_QUEUE            - Max queued requests before rejection"
+        echo "                                (default: 512)"
+        echo "  REQUEST_TIMEOUT             - Request timeout in seconds"
+        echo "                                (default: 300)"
         ;;
     *)
         log_error "Unknown command: $COMMAND"

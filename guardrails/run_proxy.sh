@@ -57,8 +57,6 @@ USE_VENV="${USE_VENV:-true}"
 # Default configuration
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-9999}"
-WORKERS="${WORKERS:-4}"                    # Number of worker processes
-CONCURRENCY="${CONCURRENCY:-128}"          # Concurrent connections per worker
 LOG_LEVEL="${LOG_LEVEL:-info}"             # info, debug, warning, error
 RELOAD="${RELOAD:-false}"
 CONFIG_FILE="${CONFIG_FILE:-config.yaml}"
@@ -148,10 +146,7 @@ start_proxy() {
     
     echo ""
     echo "Proxy Configuration:"
-    echo "  HOST:            $HOST"
     echo "  PORT:            $PORT"
-    echo "  WORKERS:         $WORKERS"
-    echo "  CONCURRENCY:     $CONCURRENCY"
     echo "  LOG_LEVEL:       $LOG_LEVEL"
     echo "  CONFIG_FILE:     $CONFIG_FILE"
     echo "  PROXY_MODULE:    $PROXY_MODULE"
@@ -255,17 +250,22 @@ start_proxy() {
     export CACHE_MAX_SIZE=\"\${CACHE_MAX_SIZE:-1000}\"
     
     # Redis configuration
-    export REDIS_ENABLED=\"\${REDIS_ENABLED:-true}\"
-    export REDIS_HOST=\"\${REDIS_HOST:-localhost}\"
-    export REDIS_PORT=\"\${REDIS_PORT:-6379}\"
-    export REDIS_DB=\"\${REDIS_DB:-0}\"
-    export REDIS_PASSWORD=\"\${REDIS_PASSWORD:-}\"
-    export REDIS_MAX_CONNECTIONS=\"\${REDIS_MAX_CONNECTIONS:-50}\"
+    export REDIS_ENABLED="${REDIS_ENABLED:-true}"
+    export REDIS_HOST="${REDIS_HOST:-localhost}"
+    export REDIS_PORT="${REDIS_PORT:-6379}"
+    export REDIS_DB="${REDIS_DB:-0}"
+    export REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+    export REDIS_MAX_CONNECTIONS="${REDIS_MAX_CONNECTIONS:-50}"
+    
+    # Concurrency configuration (Ollama-style)
+    export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-auto}"
+    export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-512}"
+    export REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-300}"
+    
     echo '[START] Running uvicorn with config:'
     echo '[START]   Module: $PROXY_MODULE'
     echo '[START]   Host: $HOST'
     echo '[START]   Port: $PORT'
-    echo '[START]   Workers: $WORKERS'
     echo '[START]   Log Level: $LOG_LEVEL'
     echo '[START]   Using local model: $LLM_GUARD_USE_LOCAL_MODELS'
     echo ''
@@ -273,8 +273,8 @@ start_proxy() {
     uvicorn $PROXY_MODULE \\
       --host $HOST \\
       --port $PORT \\
-      --workers $WORKERS \\
-      --log-level $LOG_LEVEL
+      --log-level $LOG_LEVEL \\
+      --forwarded-allow-ips="*"
   " > "$LOG_FILE" 2>&1 &
   
   local pid=$!
@@ -355,9 +355,9 @@ status_proxy() {
     echo "✓ Proxy is running (PID: $pid)"
     echo "  Host: $HOST"
     echo "  Port: $PORT"
-    echo "  Workers: $WORKERS"
     echo "  Config: $CONFIG_FILE"
     echo "  Ollama URL: $OLLAMA_URL"
+    echo "  Concurrency: ${OLLAMA_NUM_PARALLEL:-auto} parallel, ${OLLAMA_MAX_QUEUE:-512} queue"
     echo "  Nginx Whitelist: ${NGINX_WHITELIST:-empty (unrestricted)}"
     echo "  Log file: $LOG_FILE"
     echo "  Using local mode: $LLM_GUARD_USE_LOCAL_MODELS"
@@ -392,12 +392,6 @@ run_foreground() {
         ;;
       --port)
         PORT="$2"; shift 2
-        ;;
-      --workers)
-        WORKERS="$2"; shift 2
-        ;;
-      --concurrency)
-        CONCURRENCY="$2"; shift 2
         ;;
       --log-level)
         LOG_LEVEL="$2"; shift 2
@@ -442,9 +436,7 @@ Commands:
 
 Run Mode Options (with 'run' command):
   --host HOST              Server bind address (default: 0.0.0.0)
-  --port PORT              Server port (default: 8080)
-  --workers N              Number of worker processes (default: 4)
-  --concurrency N          Concurrent requests per worker (default: 128)
+  --port PORT              Server port (default: 9999)
   --log-level LEVEL        Logging level: debug, info, warning, error (default: info)
   --reload                 Auto-reload on code changes (development only)
   --debug                  Enable debug logging
@@ -468,7 +460,7 @@ Examples:
   $0 logs
 
   # Run in foreground with custom settings
-  $0 run --workers 8 --port 8080 --debug
+  $0 run --port 8080 --debug
 
   # Development mode with auto-reload
   $0 run --reload --debug
@@ -490,6 +482,15 @@ Environment Variables:
   USE_VENV                   true/false - Enable/disable venv activation
                              (default: true)
   LLM_GUARD_USE_LOCAL_MODELS true/false - Enable/disable local models
+  
+Concurrency Variables (Ollama-style):
+  OLLAMA_NUM_PARALLEL        Max parallel requests per model
+                             "auto" selects 4 if >=16GB free RAM else 1; or set explicit: 1, 2, 4, 8
+                             (default: auto)
+  OLLAMA_MAX_QUEUE           Max queued requests before rejection
+                             (default: 512)
+  REQUEST_TIMEOUT            Request timeout in seconds
+                             (default: 300)
 
 Log Files:
   All logs are written to: $LOG_DIR/proxy.log
@@ -787,13 +788,18 @@ run_interactive() {
   export REDIS_DB="${REDIS_DB:-0}"
   export REDIS_PASSWORD="${REDIS_PASSWORD:-}"
   export REDIS_MAX_CONNECTIONS="${REDIS_MAX_CONNECTIONS:-50}"
+  
+  # Concurrency configuration (Ollama-style)
+  export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-auto}"
+  export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-512}"
+  export REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-300}"
 
   # Build uvicorn command
   UVICORN_CMD="uvicorn $PROXY_MODULE"
   UVICORN_CMD="$UVICORN_CMD --host $HOST"
   UVICORN_CMD="$UVICORN_CMD --port $PORT"
-  UVICORN_CMD="$UVICORN_CMD --workers $WORKERS" 
   UVICORN_CMD="$UVICORN_CMD --log-level $LOG_LEVEL"
+  UVICORN_CMD="$UVICORN_CMD --forwarded-allow-ips='*'"
 
   # Add reload flag for development
   if [ "$RELOAD" = "true" ]; then
@@ -808,7 +814,6 @@ run_interactive() {
   echo "║ Server Configuration:"
   echo "║   Host:       $HOST"
   echo "║   Port:       $PORT"
-  echo "║   Workers:    $WORKERS"
   echo "║   Python Env:"
   if [ "$VENV_ACTIVATED" = true ]; then
     echo "║     ✓ Venv: $VENV_DIR (ACTIVE)"
@@ -817,7 +822,6 @@ run_interactive() {
   fi
   echo "║"
   echo "║ Runtime Settings:"
-  echo "║   Concurrency:     $CONCURRENCY per worker"
   echo "║   Log Level:       $LOG_LEVEL"
   echo "║   Reload:         $RELOAD"
   echo "║   Config File:    $CONFIG_FILE"
@@ -836,8 +840,13 @@ run_interactive() {
   echo "║   curl http://$HOST:$PORT/health"
   echo "║"
   echo "║ Send request:"
-  echo "║   curl -X POST http://$HOST:$PORT/v1/generate \\"
-  echo "║     -H 'Content-Type: application/json' \\"
+  echo "║   # Ollama native API"
+  echo "║   curl -X POST http://$HOST:$PORT/api/generate \\" 
+  echo "║     -H 'Content-Type: application/json' \\" 
+  echo "║     -d '{\"model\":\"mistral\",\"prompt\":\"test\"}'"
+  echo "║   # OpenAI-compatible (text completions)"
+  echo "║   curl -X POST http://$HOST:$PORT/v1/completions \\" 
+  echo "║     -H 'Content-Type: application/json' \\" 
   echo "║     -d '{\"model\":\"mistral\",\"prompt\":\"test\"}'"
   echo "║"
   echo "║ Command: $UVICORN_CMD"

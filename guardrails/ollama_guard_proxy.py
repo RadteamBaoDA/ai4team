@@ -35,6 +35,7 @@ import logging
 import re
 import time
 import uuid
+import asyncio
 
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
@@ -49,6 +50,7 @@ from config import Config
 from ip_whitelist import IPWhitelist
 from language import LanguageDetector
 from guard_manager import LLMGuardManager
+from concurrency import ConcurrencyManager
 logger = logging.getLogger(__name__)
 
 # Import performance monitoring and caching
@@ -98,6 +100,21 @@ guard_manager = LLMGuardManager(
 
 # Initialize IP whitelist (nginx only)
 ip_whitelist = IPWhitelist(config.get_list('nginx_whitelist', []))
+
+# Initialize concurrency manager (Ollama-style)
+num_parallel = config.get('ollama_num_parallel', 'auto')
+if num_parallel == 'auto':
+    concurrency_manager = ConcurrencyManager(
+        default_parallel=None,  # Auto-detect
+        default_queue_limit=config.get_int('ollama_max_queue', 512),
+        auto_detect_parallel=True
+    )
+else:
+    concurrency_manager = ConcurrencyManager(
+        default_parallel=int(num_parallel),
+        default_queue_limit=config.get_int('ollama_max_queue', 512),
+        auto_detect_parallel=False
+    )
 
 # Initialize performance optimizations
 guard_cache = None
@@ -181,6 +198,14 @@ def extract_client_ip(request: Request) -> str:
         return xreal.strip()
 
     return request.client.host if request.client else '0.0.0.0'
+
+
+def extract_model_from_payload(payload: Dict[str, Any]) -> str:
+    """Extract model name from payload."""
+    if isinstance(payload, dict):
+        model = payload.get('model', 'default')
+        return str(model) if model else 'default'
+    return 'default'
 
 
 def extract_text_from_payload(payload: Dict[str, Any]) -> str:
@@ -353,88 +378,124 @@ async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
         logger.error("Failed to parse request JSON: %s", e)
         raise HTTPException(status_code=400, detail={"error": "invalid_json", "message": str(e)})
 
+    # Extract model and prompt
+    model_name = extract_model_from_payload(payload)
     prompt = extract_text_from_payload(payload)
     detected_lang = LanguageDetector.detect_language(prompt)
+    
+    # Generate unique request ID
+    request_id = f"gen-{uuid.uuid4().hex[:8]}"
 
-    # Input guard with cache
-    if config.get('enable_input_guard', True) and prompt:
-        input_result = None
-        if HAS_OPTIMIZATIONS and guard_cache:
-            input_result = await guard_cache.get_input_result(prompt)
-            if input_result:
-                logger.debug("Input scan cache hit")
-        if not input_result:
-            input_result = await guard_manager.scan_input(prompt, block_on_error=config.get('block_on_guard_error', False))
+    # Define the processing coroutine
+    async def process_request():
+        # Input guard with cache
+        if config.get('enable_input_guard', True) and prompt:
+            input_result = None
             if HAS_OPTIMIZATIONS and guard_cache:
-                try:
-                    await guard_cache.set_input_result(prompt, input_result)
-                except Exception:
-                    pass
-        if not input_result.get('allowed', True):
-            logger.warning("Input blocked: %s", input_result)
-            reason = ', '.join([
-                f"{name}: {info.get('reason', 'Unknown')}"
-                for name, info in input_result.get('scanners', {}).items()
-                if not info.get('passed', True)
-            ])
-            error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
-            raise HTTPException(status_code=400, detail={
-                "error": "prompt_blocked",
-                "message": error_message,
-                "language": detected_lang,
-                "details": input_result
-            })
+                input_result = await guard_cache.get_input_result(prompt)
+                if input_result:
+                    logger.debug("Input scan cache hit")
+            if not input_result:
+                input_result = await guard_manager.scan_input(prompt, block_on_error=config.get('block_on_guard_error', False))
+                if HAS_OPTIMIZATIONS and guard_cache:
+                    try:
+                        await guard_cache.set_input_result(prompt, input_result)
+                    except Exception:
+                        pass
+            if not input_result.get('allowed', True):
+                logger.warning("Input blocked: %s", input_result)
+                reason = ', '.join([
+                    f"{name}: {info.get('reason', 'Unknown')}"
+                    for name, info in input_result.get('scanners', {}).items()
+                    if not info.get('passed', True)
+                ])
+                error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
+                raise HTTPException(status_code=400, detail={
+                    "error": "prompt_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": input_result
+                })
 
-    # Forward to Ollama
-    path = config.get('ollama_path', '/api/generate')
-    is_stream = bool(payload.get('stream') if isinstance(payload, dict) else False)
-    resp, err = await forward_request(path, payload=payload, stream=is_stream)
-    if err:
-        logger.error("Upstream error: %s", err)
-        error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
-        raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message, "details": err})
+        # Forward to Ollama
+        path = config.get('ollama_path', '/api/generate')
+        is_stream = bool(payload.get('stream') if isinstance(payload, dict) else False)
+        resp, err = await forward_request(path, payload=payload, stream=is_stream)
+        if err:
+            logger.error("Upstream error: %s", err)
+            error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message, "details": err})
 
-    if resp.status_code != 200:
+        if resp.status_code != 200:
+            data, parse_err = await safe_json(resp)
+            logger.error("Upstream returned %s: %s", resp.status_code, data or resp.text)
+            raise HTTPException(status_code=resp.status_code, detail=data or {"error": resp.text})
+
+        # Stream handling
+        if is_stream:
+            return StreamingResponse(stream_response_with_guard(resp, detected_lang), media_type="application/x-ndjson")
+
         data, parse_err = await safe_json(resp)
-        logger.error("Upstream returned %s: %s", resp.status_code, data or resp.text)
-        raise HTTPException(status_code=resp.status_code, detail=data or {"error": resp.text})
+        if data is None:
+            logger.error("Failed to parse upstream response: %s", parse_err)
+            error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
 
-    # Stream handling
-    if is_stream:
-        return StreamingResponse(stream_response_with_guard(resp, detected_lang), media_type="application/x-ndjson")
-
-    data, parse_err = await safe_json(resp)
-    if data is None:
-        logger.error("Failed to parse upstream response: %s", parse_err)
-        error_message = LanguageDetector.get_error_message('server_error', detected_lang)
-        raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
-
-    # Output guard with cache (non-streaming)
-    if config.get('enable_output_guard', True):
-        output_text = extract_text_from_response(data)
-        output_result = None
-        if output_text and HAS_OPTIMIZATIONS and guard_cache:
-            output_result = await guard_cache.get_output_result(output_text)
-            if output_result:
-                logger.debug("Output scan cache hit")
-        if output_result is None:
-            output_result = await guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
+        # Output guard with cache (non-streaming)
+        if config.get('enable_output_guard', True):
+            output_text = extract_text_from_response(data)
+            output_result = None
             if output_text and HAS_OPTIMIZATIONS and guard_cache:
-                try:
-                    await guard_cache.set_output_result(output_text, output_result)
-                except Exception:
-                    pass
-        if not output_result.get('allowed', True):
-            logger.warning("Output blocked: %s", output_result)
-            error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
-            raise HTTPException(status_code=400, detail={
-                "error": "response_blocked",
-                "message": error_message,
-                "language": detected_lang,
-                "details": output_result
-            })
+                output_result = await guard_cache.get_output_result(output_text)
+                if output_result:
+                    logger.debug("Output scan cache hit")
+            if output_result is None:
+                output_result = await guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
+                if output_text and HAS_OPTIMIZATIONS and guard_cache:
+                    try:
+                        await guard_cache.set_output_result(output_text, output_result)
+                    except Exception:
+                        pass
+            if not output_result.get('allowed', True):
+                logger.warning("Output blocked: %s", output_result)
+                error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                raise HTTPException(status_code=400, detail={
+                    "error": "response_blocked",
+                    "message": error_message,
+                    "language": detected_lang,
+                    "details": output_result
+                })
 
-    return JSONResponse(status_code=200, content=data)
+        return JSONResponse(status_code=200, content=data)
+    
+    # Execute with concurrency control
+    try:
+        return await concurrency_manager.execute(
+            model_name=model_name,
+            request_id=request_id,
+            coro=process_request(),
+            timeout=config.get_int('request_timeout', 300)
+        )
+    except asyncio.QueueFull:
+        error_message = LanguageDetector.get_error_message('server_busy', detected_lang)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "queue_full",
+                "message": error_message,
+                "model": model_name
+            }
+        )
+    except asyncio.TimeoutError:
+        error_message = LanguageDetector.get_error_message('request_timeout', detected_lang)
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": "timeout",
+                "message": error_message,
+                "model": model_name
+            }
+        )
 
 
 async def stream_response_with_guard(response: httpx.Response, detected_lang: str = 'en'):
@@ -851,6 +912,10 @@ async def proxy_chat(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail={"error": "invalid_json"})
     
+    # Extract model and prompt
+    model_name = extract_model_from_payload(payload)
+    request_id = f"chat-{uuid.uuid4().hex[:8]}"
+    
     # Extract prompt from messages
     prompt = ""
     if 'messages' in payload and isinstance(payload['messages'], list):
@@ -861,78 +926,96 @@ async def proxy_chat(request: Request):
     # Detect language from prompt
     detected_lang = LanguageDetector.detect_language(prompt)
     
-    # Scan input with cache
-    if config.get('enable_input_guard', True) and prompt:
-        input_result = None
-        if HAS_OPTIMIZATIONS and guard_cache:
-            input_result = await guard_cache.get_input_result(prompt)
-            if input_result:
-                logger.debug("Input scan cache hit")
-        if not input_result:
-            input_result = await guard_manager.scan_input(
-                prompt,
-                block_on_error=config.get('block_on_guard_error', False)
-            )
+    # Define processing coroutine
+    async def process_chat_request():
+        # Scan input with cache
+        if config.get('enable_input_guard', True) and prompt:
+            input_result = None
             if HAS_OPTIMIZATIONS and guard_cache:
-                try:
-                    await guard_cache.set_input_result(prompt, input_result)
-                except Exception:
-                    pass
-        if not input_result['allowed']:
-            logger.warning(f"Input blocked: {input_result}")
-            
-            # Get scanner reason
-            reason = ', '.join([
-                f"{scanner_name}: {info.get('reason', 'Unknown')}"
-                for scanner_name, info in input_result.get('scanners', {}).items()
-                if not info.get('passed', True)
-            ])
-            
-            # Get localized error message
-            error_message = LanguageDetector.get_error_message(
-                'prompt_blocked',
-                detected_lang,
-                reason
-            )
-            
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "prompt_blocked",
-                    "message": error_message,
-                    "language": detected_lang,
-                    "details": input_result
-                }
-            )
-    
-    # Forward to Ollama chat endpoint
-    ollama_url = config.get('ollama_url')
-    url = f"{ollama_url.rstrip('/')}/api/chat"
-    is_stream = 'stream' in payload and payload['stream']
-    
-    try:
-        client = get_http_client()
-        if is_stream:
-            resp = await client.stream("POST", url, json=payload, timeout=300)
-        else:
-            resp = await client.post(url, json=payload, timeout=300)
-    except httpx.RequestError as e:
-        logger.error(f"Upstream error: {e}")
-        error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
-        raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
-    
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail={"error": "upstream_error"})
-    
-    # Handle streaming or non-streaming responses
-    if is_stream:
-        return StreamingResponse(resp.aiter_bytes(), media_type="text/event-stream")
-    else:
+                input_result = await guard_cache.get_input_result(prompt)
+                if input_result:
+                    logger.debug("Input scan cache hit")
+            if not input_result:
+                input_result = await guard_manager.scan_input(
+                    prompt,
+                    block_on_error=config.get('block_on_guard_error', False)
+                )
+                if HAS_OPTIMIZATIONS and guard_cache:
+                    try:
+                        await guard_cache.set_input_result(prompt, input_result)
+                    except Exception:
+                        pass
+            if not input_result['allowed']:
+                logger.warning(f"Input blocked: {input_result}")
+                
+                # Get scanner reason
+                reason = ', '.join([
+                    f"{scanner_name}: {info.get('reason', 'Unknown')}"
+                    for scanner_name, info in input_result.get('scanners', {}).items()
+                    if not info.get('passed', True)
+                ])
+                
+                # Get localized error message
+                error_message = LanguageDetector.get_error_message(
+                    'prompt_blocked',
+                    detected_lang,
+                    reason
+                )
+                
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "prompt_blocked",
+                        "message": error_message,
+                        "language": detected_lang,
+                        "details": input_result
+                    }
+                )
+        
+        # Forward to Ollama chat endpoint
+        ollama_url = config.get('ollama_url')
+        url = f"{ollama_url.rstrip('/')}/api/chat"
+        is_stream = 'stream' in payload and payload['stream']
+        
         try:
-            data = resp.json()
-        except:
-            error_message = LanguageDetector.get_error_message('server_error', detected_lang)
-            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
+            client = get_http_client()
+            if is_stream:
+                resp = await client.stream("POST", url, json=payload, timeout=300)
+            else:
+                resp = await client.post(url, json=payload, timeout=300)
+        except httpx.RequestError as e:
+            logger.error(f"Upstream error: {e}")
+            error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
+        
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail={"error": "upstream_error"})
+        
+        # Handle streaming or non-streaming responses
+        if is_stream:
+            return StreamingResponse(resp.aiter_bytes(), media_type="text/event-stream")
+        else:
+            try:
+                data = resp.json()
+            except:
+                error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+                raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
+            return JSONResponse(status_code=200, content=data)
+    
+    # Execute with concurrency control
+    try:
+        return await concurrency_manager.execute(
+            model_name=model_name,
+            request_id=request_id,
+            coro=process_chat_request(),
+            timeout=config.get_int('request_timeout', 300)
+        )
+    except asyncio.QueueFull:
+        error_message = LanguageDetector.get_error_message('server_busy', detected_lang)
+        raise HTTPException(status_code=429, detail={"error": "queue_full", "message": error_message, "model": model_name})
+    except asyncio.TimeoutError:
+        error_message = LanguageDetector.get_error_message('request_timeout', detected_lang)
+        raise HTTPException(status_code=504, detail={"error": "timeout", "message": error_message, "model": model_name})
         
         # Scan output - Ollama chat uses 'message' field
         if config.get('enable_output_guard', True):
@@ -981,159 +1064,179 @@ async def openai_chat_completions(request: Request):
     if not isinstance(model, str) or not model.strip():
         raise HTTPException(status_code=400, detail={"error": "invalid_model", "message": "model is required."})
 
+    # Generate request ID
+    request_id = f"oai-chat-{uuid.uuid4().hex[:8]}"
+    
     prompt_text = combine_messages_text(messages)
     detected_lang = LanguageDetector.detect_language(prompt_text)
 
-    if config.get('enable_input_guard', True) and prompt_text:
-        input_result = None
-        if HAS_OPTIMIZATIONS and guard_cache:
-            input_result = await guard_cache.get_input_result(prompt_text)
-            if input_result:
-                logger.debug("Input scan cache hit")
-        if not input_result:
-            input_result = await guard_manager.scan_input(prompt_text, block_on_error=config.get('block_on_guard_error', False))
+    # Define processing coroutine
+    async def process_openai_chat():
+        if config.get('enable_input_guard', True) and prompt_text:
+            input_result = None
             if HAS_OPTIMIZATIONS and guard_cache:
-                try:
-                    await guard_cache.set_input_result(prompt_text, input_result)
-                except Exception:
-                    pass
-        if not input_result.get('allowed', True):
-            logger.warning("OpenAI input blocked: %s", input_result)
-            reason = ', '.join([
-                f"{scanner_name}: {info.get('reason', 'Unknown')}"
-                for scanner_name, info in input_result.get('scanners', {}).items()
-                if not info.get('passed', True)
-            ])
-            error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "prompt_blocked",
-                    "message": error_message,
-                    "language": detected_lang,
-                    "details": input_result
-                }
-            )
+                input_result = await guard_cache.get_input_result(prompt_text)
+                if input_result:
+                    logger.debug("Input scan cache hit")
+            if not input_result:
+                input_result = await guard_manager.scan_input(prompt_text, block_on_error=config.get('block_on_guard_error', False))
+                if HAS_OPTIMIZATIONS and guard_cache:
+                    try:
+                        await guard_cache.set_input_result(prompt_text, input_result)
+                    except Exception:
+                        pass
+            if not input_result.get('allowed', True):
+                logger.warning("OpenAI input blocked: %s", input_result)
+                reason = ', '.join([
+                    f"{scanner_name}: {info.get('reason', 'Unknown')}"
+                    for scanner_name, info in input_result.get('scanners', {}).items()
+                    if not info.get('passed', True)
+                ])
+                error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "prompt_blocked",
+                        "message": error_message,
+                        "language": detected_lang,
+                        "details": input_result
+                    }
+                )
 
-    ollama_payload: Dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "stream": bool(payload.get('stream', False))
-    }
+        ollama_payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": bool(payload.get('stream', False))
+        }
 
-    options = build_ollama_options_from_openai_payload(payload)
-    if options:
-        ollama_payload['options'] = options
+        options = build_ollama_options_from_openai_payload(payload)
+        if options:
+            ollama_payload['options'] = options
 
-    if isinstance(payload.get('tools'), list):
-        ollama_payload['tools'] = payload['tools']
-    if isinstance(payload.get('functions'), list):
-        ollama_payload['functions'] = payload['functions']
+        if isinstance(payload.get('tools'), list):
+            ollama_payload['tools'] = payload['tools']
+        if isinstance(payload.get('functions'), list):
+            ollama_payload['functions'] = payload['functions']
 
-    ollama_url = config.get('ollama_url')
-    url = f"{ollama_url.rstrip('/')}/api/chat"
-    is_stream = bool(payload.get('stream'))
+        ollama_url = config.get('ollama_url')
+        url = f"{ollama_url.rstrip('/')}/api/chat"
+        is_stream = bool(payload.get('stream'))
 
-    try:
-        client = get_http_client()
-        timeout = config.get('openai_timeout', 300)
+        try:
+            client = get_http_client()
+            timeout = config.get('openai_timeout', 300)
+            if is_stream:
+                response = await client.stream("POST", url, json=ollama_payload, timeout=timeout)
+            else:
+                response = await client.post(url, json=ollama_payload, timeout=timeout)
+        except httpx.RequestError as exc:
+            logger.error("OpenAI upstream error: %s", exc)
+            error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
+
+        if response.status_code != 200:
+            logger.error("OpenAI upstream returned %s", response.status_code)
+            try:
+                upstream_detail = response.json()
+            except Exception:
+                upstream_detail = {"error": response.text}
+            raise HTTPException(status_code=response.status_code, detail=upstream_detail)
+
         if is_stream:
-            response = await client.stream("POST", url, json=ollama_payload, timeout=timeout)
-        else:
-            response = await client.post(url, json=ollama_payload, timeout=timeout)
-    except httpx.RequestError as exc:
-        logger.error("OpenAI upstream error: %s", exc)
-        error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
-        raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
-
-    if response.status_code != 200:
-        logger.error("OpenAI upstream returned %s", response.status_code)
-        try:
-            upstream_detail = response.json()
-        except Exception:
-            upstream_detail = {"error": response.text}
-        raise HTTPException(status_code=response.status_code, detail=upstream_detail)
-
-    if is_stream:
-        return StreamingResponse(
-            stream_openai_chat_response(response, model, detected_lang),
-            media_type="text/event-stream"
-        )
-
-    try:
-        data = response.json()
-    except Exception as exc:
-        logger.error("Failed to parse OpenAI upstream response: %s", exc)
-        error_message = LanguageDetector.get_error_message('server_error', detected_lang)
-        raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
-    finally:
-        try:
-            await response.aclose()
-        except Exception:
-            pass
-
-    output_text = ""
-    if isinstance(data, dict):
-        message = data.get('message')
-        if isinstance(message, dict):
-            output_text = message.get('content', '')
-
-    if config.get('enable_output_guard', True) and output_text:
-        output_result = None
-        if HAS_OPTIMIZATIONS and guard_cache:
-            output_result = await guard_cache.get_output_result(output_text)
-            if output_result:
-                logger.debug("Output scan cache hit")
-        if output_result is None:
-            output_result = await guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
-            if HAS_OPTIMIZATIONS and guard_cache:
-                try:
-                    await guard_cache.set_output_result(output_text, output_result)
-                except Exception:
-                    pass
-        if not output_result.get('allowed', True):
-            logger.warning("OpenAI output blocked: %s", output_result)
-            error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "response_blocked",
-                    "message": error_message,
-                    "language": detected_lang,
-                    "details": output_result
-                }
+            return StreamingResponse(
+                stream_openai_chat_response(response, model, detected_lang),
+                media_type="text/event-stream"
             )
 
-    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-    created_ts = int(time.time())
-    usage = {
-        "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
-        "completion_tokens": int(data.get('eval_count', 0) or 0)
-    }
-    usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
+        try:
+            data = response.json()
+        except Exception as exc:
+            logger.error("Failed to parse OpenAI upstream response: %s", exc)
+            error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
+        finally:
+            try:
+                await response.aclose()
+            except Exception:
+                pass
 
-    result = {
-        "id": completion_id,
-        "object": "chat.completion",
-        "created": created_ts,
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": output_text
-                },
-                "finish_reason": "stop" if data.get('done', True) else None
-            }
-        ],
-        "usage": usage
-    }
+        output_text = ""
+        if isinstance(data, dict):
+            message = data.get('message')
+            if isinstance(message, dict):
+                output_text = message.get('content', '')
 
-    if 'system_fingerprint' in data:
-        result['system_fingerprint'] = data['system_fingerprint']
+        if config.get('enable_output_guard', True) and output_text:
+            output_result = None
+            if HAS_OPTIMIZATIONS and guard_cache:
+                output_result = await guard_cache.get_output_result(output_text)
+                if output_result:
+                    logger.debug("Output scan cache hit")
+            if output_result is None:
+                output_result = await guard_manager.scan_output(output_text, block_on_error=config.get('block_on_guard_error', False))
+                if HAS_OPTIMIZATIONS and guard_cache:
+                    try:
+                        await guard_cache.set_output_result(output_text, output_result)
+                    except Exception:
+                        pass
+            if not output_result.get('allowed', True):
+                logger.warning("OpenAI output blocked: %s", output_result)
+                error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "response_blocked",
+                        "message": error_message,
+                        "language": detected_lang,
+                        "details": output_result
+                    }
+                )
 
-    return JSONResponse(status_code=200, content=result)
+        completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+        created_ts = int(time.time())
+        usage = {
+            "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+            "completion_tokens": int(data.get('eval_count', 0) or 0)
+        }
+        usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
+
+        result = {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created_ts,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": output_text
+                    },
+                    "finish_reason": "stop" if data.get('done', True) else None
+                }
+            ],
+            "usage": usage
+        }
+
+        if 'system_fingerprint' in data:
+            result['system_fingerprint'] = data['system_fingerprint']
+
+        return JSONResponse(status_code=200, content=result)
+    
+    # Execute with concurrency control
+    try:
+        return await concurrency_manager.execute(
+            model_name=model,
+            request_id=request_id,
+            coro=process_openai_chat(),
+            timeout=config.get_int('request_timeout', 300)
+        )
+    except asyncio.QueueFull:
+        error_message = LanguageDetector.get_error_message('server_busy', detected_lang)
+        raise HTTPException(status_code=429, detail={"error": "queue_full", "message": error_message, "model": model})
+    except asyncio.TimeoutError:
+        error_message = LanguageDetector.get_error_message('request_timeout', detected_lang)
+        raise HTTPException(status_code=504, detail={"error": "timeout", "message": error_message, "model": model})
 
 
 @app.post("/v1/completions")
@@ -1512,6 +1615,15 @@ async def health_check():
         "whitelist": ip_whitelist.get_stats(),
     }
     
+    # Add concurrency info
+    queue_stats = await concurrency_manager.get_stats()
+    health_data['concurrency'] = {
+        "default_parallel": queue_stats.get('default_parallel'),
+        "default_queue_limit": queue_stats.get('default_queue_limit'),
+        "total_models": queue_stats.get('total_models', 0),
+        "memory": concurrency_manager.get_memory_info()
+    }
+    
     # Add device information
     if hasattr(guard_manager, 'device'):
         health_data['device'] = guard_manager.device
@@ -1623,6 +1735,44 @@ async def cleanup_cache():
     
     removed = await guard_cache.cleanup_expired()
     return {"status": "success", "removed": removed}
+
+
+@app.get("/queue/stats")
+async def get_queue_stats(model: Optional[str] = None):
+    """Get queue statistics for all models or a specific model."""
+    stats = await concurrency_manager.get_stats(model_name=model)
+    return stats
+
+
+@app.get("/queue/memory")
+async def get_memory_info():
+    """Get current memory information and recommended parallel limit."""
+    return concurrency_manager.get_memory_info()
+
+
+@app.post("/admin/queue/reset")
+async def reset_queue_stats(model: Optional[str] = None):
+    """Reset queue statistics (admin endpoint)."""
+    await concurrency_manager.reset_stats(model_name=model)
+    return {
+        "status": "success",
+        "message": f"Statistics reset for {'all models' if not model else f'model {model}'}"
+    }
+
+
+@app.post("/admin/queue/update")
+async def update_queue_limits(
+    model: str,
+    parallel_limit: Optional[int] = None,
+    queue_limit: Optional[int] = None
+):
+    """Update queue limits for a specific model (admin endpoint)."""
+    result = await concurrency_manager.update_limits(
+        model_name=model,
+        parallel_limit=parallel_limit,
+        queue_limit=queue_limit
+    )
+    return result
 
 
 if __name__ == "__main__":

@@ -24,6 +24,9 @@ class LanguageDetector:
             'response_blocked': 'Model output was blocked by the security scanner.',
             'server_error': 'Internal server error.',
             'upstream_error': 'Upstream service error.',
+            'server_busy': 'Server is currently busy processing other requests. Please try again later.',
+            'request_timeout': 'Request timed out. Please try again with a shorter prompt or later.',
+            'queue_full': 'Request queue is full. Server is currently overloaded.',
         },
         # Additional languages omitted for brevity; main file retains full set if needed.
     }

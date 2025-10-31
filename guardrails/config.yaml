@@ -59,6 +59,22 @@ rate_limit_per_minute: 60
 rate_limit_per_hour: 1000
 rate_limit_burst: 10
 
+# Concurrency Configuration (Ollama-style)
+# Maximum number of parallel requests each model will process at the same time
+# Set to 'auto' to detect based on available memory (4 if >= 16GB, 2 if >= 8GB, else 1)
+# Or set a specific number (e.g., 1, 2, 4, 8)
+ollama_num_parallel: "auto"
+
+# Maximum number of requests in queue when busy before rejecting
+# Default is 512 (same as Ollama)
+ollama_max_queue: 512
+
+# Request timeout in seconds (for queued requests)
+request_timeout: 300
+
+# Enable per-model queue statistics
+enable_queue_stats: true
+
 # Input Scanner Configuration
 input_scanners:
   ban_substrings:
