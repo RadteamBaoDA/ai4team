@@ -1,0 +1,40 @@
+inlet called: {'stream': True, 'model': 'gpt-oss:latest', 'messages': [
+        {'role': 'user', 'content': 'hello'
+        }
+    ], 'features': {'image_generation': False, 'code_interpreter': False, 'web_search': False
+    }, 'metadata': {'user_id': 'a6729513-c1f3-4399-899a-6e5b00d72b6e', 'chat_id': '961fa455-a1f2-4d7b-9d96-7d07685f9e91', 'message_id': 'ad23cbef-9196-4769-9221-1ca17eae6434', 'session_id': 'mQsQFej9TL6TEkPrAAAB', 'filter_ids': [], 'tool_ids': None, 'tool_servers': [], 'files': None, 'features': {'image_generation': False, 'code_interpreter': False, 'web_search': False
+        }, 'variables': {'{
+                {USER_NAME
+                }
+            }': 'admin', '{
+                {USER_LOCATION
+                }
+            }': 'Unknown', '{
+                {CURRENT_DATETIME
+                }
+            }': '2025-11-02 01: 27: 43', '{
+                {CURRENT_DATE
+                }
+            }': '2025-11-02', '{
+                {CURRENT_TIME
+                }
+            }': '01: 27: 43', '{
+                {CURRENT_WEEKDAY
+                }
+            }': 'Sunday', '{
+                {CURRENT_TIMEZONE
+                }
+            }': 'Asia/Saigon', '{
+                {USER_LANGUAGE
+                }
+            }': 'en-US'
+        }, 'model': {'id': 'gpt-oss:latest', 'name': 'gpt-oss:latest', 'object': 'model', 'created': 1762021642, 'owned_by': 'ollama', 'ollama': {'name': 'gpt-oss:latest', 'model': 'gpt-oss:latest', 'modified_at': '2025-09-19T21: 03: 03.3409348+07: 00', 'size': 13780173724, 'digest': 'aa4295ac10c3afb60e6d711289fc6896f5aef82258997b9efdaed6d0cc4cd8b8', 'details': {'parent_model': '', 'format': 'gguf', 'family': 'gptoss', 'families': ['gptoss'
+                    ], 'parameter_size': '20.9B', 'quantization_level': 'MXFP4'
+                }, 'connection_type': 'local', 'urls': [
+                    0
+                ]
+            }, 'connection_type': 'local', 'tags': [], 'actions': [], 'filters': []
+        }, 'direct': False, 'params': {'stream_delta_chunk_size': None, 'reasoning_tags': None, 'function_calling': 'default'
+        }
+    }, 'options': {}
+}

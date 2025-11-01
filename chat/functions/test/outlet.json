@@ -1,0 +1,10 @@
+
+outlet called: {'model': 'gpt-oss:latest', 'messages': [
+        {'id': '5d53c06e-f55c-4e50-99d9-4c0793a4eaaa', 'role': 'user', 'content': 'hello', 'timestamp': 1762022148
+        },
+        {'id': '00bfab26-3049-41a2-bca9-4b0898f7ba69', 'role': 'assistant', 'content': '<details type="reasoning" done="true" duration="0">\n<summary>Thought for 0 seconds</summary>\n> User says "hello". We respond politely.\n</details>\nHello! How can I help you today?', 'timestamp': 1762022148, 'usage': {'response_token/s': 103.52, 'prompt_token/s': 430.51, 'total_duration': 588698800, 'load_duration': 144972700, 'prompt_eval_count': 68, 'prompt_tokens': 68, 'prompt_eval_duration': 157950800, 'eval_count': 28, 'completion_tokens': 28, 'eval_duration': 270480000, 'approximate_total': '0h0m0s', 'total_tokens': 96, 'completion_tokens_details': {'reasoning_tokens': 0, 'accepted_prediction_tokens': 0, 'rejected_prediction_tokens': 0
+                }
+            }
+        }
+    ], 'chat_id': '33b91558-4e52-4d4f-9b13-414fcdf35f5c', 'session_id': 'mQsQFej9TL6TEkPrAAAB', 'id': '00bfab26-3049-41a2-bca9-4b0898f7ba69'
+}

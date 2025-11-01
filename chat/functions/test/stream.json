@@ -1,0 +1,7 @@
+stream event: {'id': 'gpt-oss:latest-19e1a9cd-f716-497b-aaa0-259ab48d54c2', 'created': 1762022150, 'model': 'gpt-oss:latest', 'choices': [
+        {'index': 0, 'logprobs': None, 'finish_reason': 'stop', 'delta': {}
+        }
+    ], 'object': 'chat.completion.chunk', 'usage': {'response_token/s': 103.52, 'prompt_token/s': 430.51, 'total_duration': 588698800, 'load_duration': 144972700, 'prompt_eval_count': 68, 'prompt_tokens': 68, 'prompt_eval_duration': 157950800, 'eval_count': 28, 'completion_tokens': 28, 'eval_duration': 270480000, 'approximate_total': '0h0m0s', 'total_tokens': 96, 'completion_tokens_details': {'reasoning_tokens': 0, 'accepted_prediction_tokens': 0, 'rejected_prediction_tokens': 0
+        }
+    }
+}
