@@ -1,0 +1,126 @@
+================================================================================
+DOCUMENT CONVERTER v2.2 - SUPPORTED FILE FORMATS
+================================================================================
+
+✅ TOTAL: 27 FILE TYPES SUPPORTED
+
+================================================================================
+FILES TO CONVERT → PDF (9-11 types, depending on configuration)
+================================================================================
+
+Microsoft Office:
+  ✓ .docx, .doc      - Word documents
+  ✓ .xlsx, .xls      - Excel spreadsheets (OPTIONAL - controlled by env variable)
+  ✓ .pptx, .ppt      - PowerPoint presentations
+
+OpenDocument:
+  ✓ .odt             - OpenDocument Text
+  ✓ .ods             - OpenDocument Spreadsheet
+  ✓ .odp             - OpenDocument Presentation
+
+Data:
+  ✓ .csv             - Comma-Separated Values
+
+Other:
+  ✓ .rtf             - Rich Text Format
+  ✓ .html, .htm      - HTML files
+
+================================================================================
+FILES TO COPY AS-IS (16-18 types, depending on configuration)
+================================================================================
+
+Documents:
+  ✓ .pdf             - PDF files
+  ✓ .txt             - Plain text files
+  ✓ .md              - Markdown files
+  ✓ .xml             - XML files
+  ✓ .xlsx, .xls      - Excel files (if CONVERT_EXCEL_FILES=false)
+
+Images:
+  ✓ .jpg, .jpeg      - JPEG images
+  ✓ .png             - PNG images
+  ✓ .gif             - GIF images
+  ✓ .bmp             - Bitmap images
+  ✓ .tiff            - TIFF images
+  ✓ .svg             - SVG images
+
+Archives:
+  ✓ .zip, .rar, .7z  - Archive files
+
+================================================================================
+ENVIRONMENT CONFIGURATION
+================================================================================
+
+CONVERT_EXCEL_FILES (default: true)
+  • Set to "true"  → Excel files (.xlsx, .xls) are CONVERTED to PDF
+  • Set to "false" → Excel files (.xlsx, .xls) are COPIED as-is
+
+Windows (Command Prompt):
+  set CONVERT_EXCEL_FILES=false
+  python main.py
+
+Windows (PowerShell):
+  $env:CONVERT_EXCEL_FILES="false"
+  python main.py
+
+Linux/macOS:
+  export CONVERT_EXCEL_FILES=false
+  python main.py
+
+================================================================================
+QUICK START
+================================================================================
+
+1. Place files in ./input directory
+2. (Optional) Set CONVERT_EXCEL_FILES environment variable
+3. Run: python main.py
+4. Check results in ./output directory
+
+All file types are processed automatically!
+
+================================================================================
+EXAMPLES
+================================================================================
+
+Example 1: Convert CSV to PDF
+  input/data.csv  →  output/data.pdf
+
+Example 2: Copy text files (no conversion)
+  input/notes.txt  →  output/notes.txt (copied)
+  input/README.md  →  output/README.md (copied)
+
+Example 3: Excel with conversion enabled (default)
+  CONVERT_EXCEL_FILES=true
+  input/report.xlsx  →  output/report.pdf (converted)
+
+Example 4: Excel with conversion disabled
+  CONVERT_EXCEL_FILES=false
+  input/report.xlsx  →  output/report.xlsx (copied)
+
+Example 5: Mixed folder
+  input/
+    ├── data.csv       →  output/data.pdf (converted)
+    ├── notes.txt      →  output/notes.txt (copied)
+    ├── report.pdf     →  output/report.pdf (copied)
+    └── chart.jpg      →  output/chart.jpg (copied)
+
+================================================================================
+CONVERSION METHODS
+================================================================================
+
+Priority order:
+  1. LibreOffice     (if installed)
+  2. MS Office 365   (if installed)
+  3. Python libraries (fallback)
+
+Python converters:
+  • CsvConverter    - CSV files
+  • DocxConverter   - Word documents
+  • XlsxConverter   - Excel spreadsheets
+  • PptxConverter   - PowerPoint presentations
+
+================================================================================
+VERSION: 2.2
+DATE: November 3, 2025
+CHANGES: TXT/MD/XML now copied (not converted), Excel conversion optional
+================================================================================

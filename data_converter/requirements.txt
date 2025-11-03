@@ -1,0 +1,22 @@
+# Document Converter Requirements
+
+# For DOCX conversion (Windows only - requires MS Word)
+docx2pdf>=0.1.8
+
+# For XLSX conversion
+openpyxl>=3.1.2
+
+# For PPTX conversion
+python-pptx>=0.6.23
+
+# PDF generation and manipulation
+reportlab>=4.0.7
+
+# For Microsoft Office 365 integration (Windows only)
+pywin32>=311; platform_system=="Windows"
+
+# Alternative: For cross-platform conversion (requires LibreOffice installation)
+# LibreOffice must be installed separately on the system
+# Windows: https://www.libreoffice.org/download/download/
+# Linux: sudo apt-get install libreoffice
+# macOS: brew install libreoffice

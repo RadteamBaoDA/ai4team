@@ -1,0 +1,327 @@
+"""
+Main Document Converter class with parallel processing and retry support
+"""
+
+import os
+from pathlib import Path
+from typing import List, Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+from .converters import ConverterFactory
+from .utils import setup_logger, FileScanner
+from .utils.file_hash import should_skip_conversion, should_skip_copy
+from config.settings import DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR
+
+
+class DocumentConverter:
+    """Handles conversion of Office documents to PDF format with parallel processing"""
+    
+    def __init__(self, input_dir: Optional[str] = None, output_dir: Optional[str] = None, 
+                 max_workers: Optional[int] = None, enable_parallel: bool = True):
+        """
+        Initialize the converter
+        
+        Args:
+            input_dir: Source directory containing documents (default: ./input)
+            output_dir: Destination directory for converted PDFs (default: ./output)
+            max_workers: Maximum number of parallel workers (default: CPU cores / 2)
+            enable_parallel: Enable parallel processing (default: True)
+        """
+        # Use default directories if not provided
+        if input_dir is None:
+            self.input_dir = DEFAULT_INPUT_DIR
+        else:
+            self.input_dir = Path(input_dir).resolve()
+        
+        if output_dir is None:
+            self.output_dir = DEFAULT_OUTPUT_DIR
+        else:
+            self.output_dir = Path(output_dir).resolve()
+        
+        # Create input directory if it doesn't exist
+        self.input_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create output directory if it doesn't exist
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Parallel processing configuration
+        self.enable_parallel = enable_parallel
+        if max_workers is None:
+            # Default: CPU cores / 2, minimum 1
+            cpu_count = os.cpu_count() or 2
+            self.max_workers = max(1, cpu_count // 2)
+        else:
+            self.max_workers = max(1, max_workers)
+        
+        # Thread-safe lock for statistics
+        self.stats_lock = Lock()
+        
+        # Initialize components
+        self.logger = setup_logger(__name__)
+        self.scanner = FileScanner(self.input_dir)
+        self.converter_factory = ConverterFactory()
+        
+        # Log initialization
+        self.logger.info(f"Input directory: {self.input_dir}")
+        self.logger.info(f"Output directory: {self.output_dir}")
+        self.logger.info(f"Parallel processing: {'Enabled' if self.enable_parallel else 'Disabled'}")
+        if self.enable_parallel:
+            self.logger.info(f"Max workers: {self.max_workers}")
+        
+        # Log available converters
+        available = self.converter_factory.get_available_converters_info()
+        self.logger.info("Available converters:")
+        for name, status in available.items():
+            status_str = "[OK] Available" if status else "[--] Not available"
+            self.logger.info(f"  {name}: {status_str}")
+    
+    def find_all_documents(self) -> List[Path]:
+        """
+        Recursively find all supported documents in input directory
+        
+        Returns:
+            List of Path objects for all found documents
+        """
+        self.logger.info("Scanning for documents...")
+        documents = self.scanner.find_all_documents()
+        self.logger.info(f"Found {len(documents)} documents to convert")
+        return documents
+    
+    def get_output_path(self, input_file: Path) -> Path:
+        """
+        Calculate output path maintaining folder structure
+        
+        Args:
+            input_file: Input file path
+            
+        Returns:
+            Output file path with .pdf extension
+        """
+        return self.scanner.get_output_path(input_file, self.input_dir, self.output_dir)
+    
+    def convert_file(self, input_file: Path, retry_count: int = 1) -> Tuple[bool, Path]:
+        """
+        Convert a single file to PDF with retry support
+        
+        Args:
+            input_file: Source file to convert
+            retry_count: Number of retries on failure (default: 1)
+            
+        Returns:
+            Tuple of (success status, output file path)
+        """
+        output_file = self.get_output_path(input_file)
+        
+        # Check if we can skip conversion (output exists and is up-to-date)
+        if should_skip_conversion(input_file, output_file):
+            self.logger.info(f"[SKIP] Output already exists and is up-to-date: {output_file.name}")
+            return True, output_file
+        
+        self.logger.info(f"Converting: {input_file.name} -> {output_file.name}")
+        
+        # Get converters for this file type
+        converters = self.converter_factory.get_converters_for_file(input_file)
+        
+        if not converters:
+            self.logger.error(f"No converters available for {input_file.name}")
+            return False, output_file
+        
+        # Try with retry logic
+        for attempt in range(retry_count + 1):
+            if attempt > 0:
+                self.logger.info(f"[RETRY {attempt}/{retry_count}] Retrying: {input_file.name}")
+            
+            # Try each converter in order
+            for converter in converters:
+                converter_name = converter.__class__.__name__
+                self.logger.debug(f"Trying {converter_name}...")
+                
+                try:
+                    if converter.convert(input_file, output_file):
+                        retry_msg = f" (retry {attempt})" if attempt > 0 else ""
+                        self.logger.info(f"[OK] Successfully converted: {input_file.name}{retry_msg} (using {converter_name})")
+                        return True, output_file
+                except Exception as e:
+                    self.logger.debug(f"{converter_name} failed: {e}")
+                    continue
+        
+        # All converters and retries failed
+        self.logger.error(f"[FAIL] Failed to convert: {input_file.name} (all converters failed after {retry_count} retries)")
+        return False, output_file
+    
+    def copy_file(self, input_file: Path, retry_count: int = 1) -> Tuple[bool, Path]:
+        """
+        Copy a file to output directory maintaining structure with retry support
+        
+        Args:
+            input_file: Source file to copy
+            retry_count: Number of retries on failure (default: 1)
+            
+        Returns:
+            Tuple of (success status, output file path)
+        """
+        import shutil
+        import time
+        
+        output_file = self.get_output_path(input_file)
+        # Keep original extension for copied files
+        output_file = output_file.with_suffix(input_file.suffix)
+        
+        # Check if we can skip copy (output exists and is identical)
+        if should_skip_copy(input_file, output_file):
+            self.logger.info(f"[SKIP] File already exists and is identical: {output_file.name}")
+            return True, output_file
+        
+        self.logger.info(f"Copying: {input_file.name}")
+        
+        # Try with retry logic
+        for attempt in range(retry_count + 1):
+            if attempt > 0:
+                self.logger.info(f"[RETRY {attempt}/{retry_count}] Retrying copy: {input_file.name}")
+                time.sleep(0.1)  # Brief delay before retry
+            
+            try:
+                shutil.copy2(input_file, output_file)
+                retry_msg = f" (retry {attempt})" if attempt > 0 else ""
+                self.logger.info(f"[OK] Successfully copied: {input_file.name}{retry_msg}")
+                return True, output_file
+            except Exception as e:
+                if attempt < retry_count:
+                    self.logger.warning(f"Copy failed, will retry: {input_file.name} - {e}")
+                else:
+                    self.logger.error(f"[FAIL] Failed to copy: {input_file.name} - {e}")
+        
+        return False, output_file
+    
+    def _process_file_wrapper(self, file_info: Tuple[Path, str]) -> Tuple[bool, str, Path]:
+        """
+        Wrapper for processing a file (convert or copy) - used for parallel execution
+        
+        Args:
+            file_info: Tuple of (file_path, operation_type) where operation is 'convert' or 'copy'
+            
+        Returns:
+            Tuple of (success, operation_type, file_path)
+        """
+        file_path, operation = file_info
+        
+        if operation == 'convert':
+            success, _ = self.convert_file(file_path)
+        else:  # operation == 'copy'
+            success, _ = self.copy_file(file_path)
+        
+        return success, operation, file_path
+    
+    def convert_all(self, enable_parallel: Optional[bool] = None) -> dict:
+        """
+        Convert all documents in input directory and copy non-convertible files
+        Supports both parallel and sequential processing
+        
+        Args:
+            enable_parallel: Override parallel processing setting (default: use instance setting)
+        
+        Returns:
+            Dictionary with conversion statistics
+        """
+        # Categorize files
+        files_to_convert, files_to_copy = self.scanner.categorize_files()
+        
+        total_files = len(files_to_convert) + len(files_to_copy)
+        
+        if total_files == 0:
+            self.logger.warning("No files found to process")
+            return {
+                'total': 0, 
+                'converted': 0, 
+                'copied': 0,
+                'skipped': 0,
+                'failed': 0, 
+                'failed_files': []
+            }
+        
+        self.logger.info(f"Found {len(files_to_convert)} files to convert")
+        self.logger.info(f"Found {len(files_to_copy)} files to copy")
+        
+        # Use instance setting if not overridden
+        use_parallel = self.enable_parallel if enable_parallel is None else enable_parallel
+        
+        stats = {
+            'total': total_files,
+            'converted': 0,
+            'copied': 0,
+            'skipped': 0,
+            'failed': 0,
+            'failed_files': []
+        }
+        
+        if use_parallel and total_files > 1:
+            # Parallel processing
+            self.logger.info(f"Processing files in parallel with {self.max_workers} workers")
+            self._convert_all_parallel(files_to_convert, files_to_copy, stats)
+        else:
+            # Sequential processing
+            if not use_parallel:
+                self.logger.info("Processing files sequentially (parallel disabled)")
+            self._convert_all_sequential(files_to_convert, files_to_copy, stats)
+        
+        return stats
+    
+    def _convert_all_sequential(self, files_to_convert: List[Path], files_to_copy: List[Path], stats: dict):
+        """Sequential processing of files"""
+        # Convert files
+        for doc in files_to_convert:
+            success, output_path = self.convert_file(doc)
+            
+            if success:
+                stats['converted'] += 1
+            else:
+                stats['failed'] += 1
+                stats['failed_files'].append(str(doc))
+        
+        # Copy files
+        for doc in files_to_copy:
+            success, output_path = self.copy_file(doc)
+            
+            if success:
+                stats['copied'] += 1
+            else:
+                stats['failed'] += 1
+                stats['failed_files'].append(str(doc))
+    
+    def _convert_all_parallel(self, files_to_convert: List[Path], files_to_copy: List[Path], stats: dict):
+        """Parallel processing of files using ThreadPoolExecutor"""
+        # Prepare work items: list of (file_path, operation_type)
+        work_items = [(f, 'convert') for f in files_to_convert] + [(f, 'copy') for f in files_to_copy]
+        
+        # Process files in parallel
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all tasks
+            future_to_file = {
+                executor.submit(self._process_file_wrapper, item): item 
+                for item in work_items
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_file):
+                item = future_to_file[future]
+                file_path, operation = item
+                
+                try:
+                    success, op_type, processed_file = future.result()
+                    
+                    # Thread-safe statistics update
+                    with self.stats_lock:
+                        if success:
+                            if op_type == 'convert':
+                                stats['converted'] += 1
+                            else:
+                                stats['copied'] += 1
+                        else:
+                            stats['failed'] += 1
+                            stats['failed_files'].append(str(processed_file))
+                            
+                except Exception as e:
+                    self.logger.error(f"Unexpected error processing {file_path.name}: {e}")
+                    with self.stats_lock:
+                        stats['failed'] += 1
+                        stats['failed_files'].append(str(file_path))
