@@ -256,8 +256,9 @@ class DocumentConverter:
         
         if use_parallel and total_files > 1:
             # Parallel processing
-            self.logger.info(f"Processing files in parallel with {self.max_workers} workers")
-            self._convert_all_parallel(files_to_convert, files_to_copy, stats)
+            worker_count = min(self.max_workers, max(1, total_files))
+            self.logger.info(f"Processing files in parallel with {worker_count} workers")
+            self._convert_all_parallel(files_to_convert, files_to_copy, stats, worker_count)
         else:
             # Sequential processing
             if not use_parallel:
@@ -265,7 +266,7 @@ class DocumentConverter:
             self._convert_all_sequential(files_to_convert, files_to_copy, stats)
         
         return stats
-    
+
     def _convert_all_sequential(self, files_to_convert: List[Path], files_to_copy: List[Path], stats: dict):
         """Sequential processing of files"""
         # Convert files
@@ -288,13 +289,22 @@ class DocumentConverter:
                 stats['failed'] += 1
                 stats['failed_files'].append(str(doc))
     
-    def _convert_all_parallel(self, files_to_convert: List[Path], files_to_copy: List[Path], stats: dict):
+    def _convert_all_parallel(
+        self,
+        files_to_convert: List[Path],
+        files_to_copy: List[Path],
+        stats: dict,
+        worker_count: int,
+    ):
         """Parallel processing of files using ThreadPoolExecutor"""
         # Prepare work items: list of (file_path, operation_type)
         work_items = [(f, 'convert') for f in files_to_convert] + [(f, 'copy') for f in files_to_copy]
         
         # Process files in parallel
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        if not work_items:
+            return
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
             # Submit all tasks
             future_to_file = {
                 executor.submit(self._process_file_wrapper, item): item 

@@ -1,42 +1,63 @@
-"""
-File hash utilities for comparing files with performance optimizations
-"""
+"""File hash utilities with caching and safety optimisations."""
 
+from functools import lru_cache
 import hashlib
 from pathlib import Path
-from typing import Optional
-from functools import lru_cache
 
-
-# Optimized chunk size for better performance (64KB)
-CHUNK_SIZE = 65536
+# Optimised chunk size for better performance (64KB)
+CHUNK_SIZE = 65_536
 
 
 @lru_cache(maxsize=128)
-def calculate_file_hash(file_path: Path, algorithm: str = 'md5') -> str:
+def _calculate_file_hash_cached(
+    path_str: str,
+    algorithm: str,
+    modified_ns: int,
+    file_size: int,
+) -> str:
+    """Internal helper to cache file hash values.
+
+    The cache key includes the absolute path, last-modified timestamp (ns), and
+    file size so cached values stay valid even when files change in place.
     """
-    Calculate hash of a file with caching for better performance
-    
-    Args:
-        file_path: Path to the file
-        algorithm: Hash algorithm to use (default: md5)
-        
-    Returns:
-        Hex digest of file hash
-    """
-    hash_obj = hashlib.new(algorithm)
-    
+
     try:
-        # Convert to string for hashable cache key
-        file_path = Path(file_path)
-        
-        with open(file_path, 'rb') as f:
-            # Read file in optimized chunks for large files
-            while chunk := f.read(CHUNK_SIZE):
+        hash_obj = hashlib.new(algorithm)
+    except ValueError:
+        return ""
+
+    try:
+        with open(path_str, "rb") as source:
+            while chunk := source.read(CHUNK_SIZE):
                 hash_obj.update(chunk)
         return hash_obj.hexdigest()
     except Exception:
         return ""
+
+
+def calculate_file_hash(file_path: Path, algorithm: str = "md5") -> str:
+    """Calculate a hash for the given file with resilient caching."""
+
+    path_obj = Path(file_path)
+
+    try:
+        stat_info = path_obj.stat()
+    except (FileNotFoundError, PermissionError, OSError):
+        return ""
+
+    # Include metadata in the cache key to keep values fresh after updates.
+    return _calculate_file_hash_cached(
+        str(path_obj.resolve()),
+        algorithm,
+        getattr(stat_info, "st_mtime_ns", int(stat_info.st_mtime * 1_000_000_000)),
+        stat_info.st_size,
+    )
+
+
+# Expose cache helpers for compatibility with existing diagnostics/tests.
+calculate_file_hash.cache_info = _calculate_file_hash_cached.cache_info  # type: ignore[attr-defined]
+calculate_file_hash.cache_clear = _calculate_file_hash_cached.cache_clear  # type: ignore[attr-defined]
+calculate_file_hash.__wrapped__ = _calculate_file_hash_cached  # type: ignore[attr-defined]
 
 
 def files_are_identical(file1: Path, file2: Path) -> bool:
