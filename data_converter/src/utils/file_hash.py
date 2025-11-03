@@ -15,7 +15,7 @@ def _calculate_file_hash_cached(
     modified_ns: int,
     file_size: int,
 ) -> str:
-    """Internal helper to cache file hash values.
+    """Internal helper to cache file hash values in memory.
 
     The cache key includes the absolute path, last-modified timestamp (ns), and
     file size so cached values stay valid even when files change in place.
@@ -35,8 +35,17 @@ def _calculate_file_hash_cached(
         return ""
 
 
-def calculate_file_hash(file_path: Path, algorithm: str = "md5") -> str:
-    """Calculate a hash for the given file with resilient caching."""
+def calculate_file_hash(file_path: Path, algorithm: str = "md5", use_persistent_cache: bool = True) -> str:
+    """Calculate a hash for the given file with resilient caching.
+    
+    Args:
+        file_path: Path to the file
+        algorithm: Hash algorithm (default: md5)
+        use_persistent_cache: Use persistent SQLite cache (default: True)
+    
+    Returns:
+        Hex digest of file hash
+    """
 
     path_obj = Path(file_path)
 
@@ -45,13 +54,40 @@ def calculate_file_hash(file_path: Path, algorithm: str = "md5") -> str:
     except (FileNotFoundError, PermissionError, OSError):
         return ""
 
-    # Include metadata in the cache key to keep values fresh after updates.
-    return _calculate_file_hash_cached(
+    file_size = stat_info.st_size
+    modified_ns = getattr(stat_info, "st_mtime_ns", int(stat_info.st_mtime * 1_000_000_000))
+    
+    # Try persistent cache first (v2.5 feature)
+    if use_persistent_cache:
+        try:
+            from .hash_cache import get_hash_cache
+            cache = get_hash_cache()
+            cached_hash = cache.get(path_obj, file_size, modified_ns, algorithm)
+            if cached_hash:
+                return cached_hash
+        except Exception:
+            # Fall back to memory cache if persistent cache fails
+            pass
+    
+    # Calculate hash (will use memory cache)
+    hash_value = _calculate_file_hash_cached(
         str(path_obj.resolve()),
         algorithm,
-        getattr(stat_info, "st_mtime_ns", int(stat_info.st_mtime * 1_000_000_000)),
-        stat_info.st_size,
+        modified_ns,
+        file_size,
     )
+    
+    # Store in persistent cache
+    if use_persistent_cache and hash_value:
+        try:
+            from .hash_cache import get_hash_cache
+            cache = get_hash_cache()
+            cache.set(path_obj, file_size, modified_ns, hash_value, algorithm)
+        except Exception:
+            # Silently ignore cache write failures
+            pass
+    
+    return hash_value
 
 
 # Expose cache helpers for compatibility with existing diagnostics/tests.

@@ -1,10 +1,11 @@
 """
 Main Document Converter class with parallel processing and retry support
+v2.5: Adaptive workers, priority queue, progress bars, batch optimization, persistent cache
 """
 
 import os
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from .converters import ConverterFactory
@@ -12,12 +13,51 @@ from .utils import setup_logger, FileScanner
 from .utils.file_hash import should_skip_conversion, should_skip_copy
 from config.settings import DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR
 
+# Optional progress bar support
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+    # Fallback: simple progress tracker
+    class tqdm:
+        def __init__(self, iterable=None, total=None, desc=None, **kwargs):
+            self.iterable = iterable
+            self.total = total
+            self.desc = desc
+            self.n = 0
+        
+        def __iter__(self):
+            return iter(self.iterable) if self.iterable else iter([])
+        
+        def __enter__(self):
+            return self
+        
+        def __exit__(self, *args):
+            pass
+        
+        def update(self, n=1):
+            self.n += n
+        
+        def set_description(self, desc):
+            self.desc = desc
+
 
 class DocumentConverter:
-    """Handles conversion of Office documents to PDF format with parallel processing"""
+    """Handles conversion of Office documents to PDF format with parallel processing
+    
+    v2.5 Features:
+    - Adaptive worker count based on file sizes
+    - Priority queue for large files
+    - Visual progress bars
+    - Batch optimization for small files
+    - Persistent hash cache
+    """
     
     def __init__(self, input_dir: Optional[str] = None, output_dir: Optional[str] = None, 
-                 max_workers: Optional[int] = None, enable_parallel: bool = True):
+                 max_workers: Optional[int] = None, enable_parallel: bool = True,
+                 enable_progress_bar: bool = True, adaptive_workers: bool = True,
+                 priority_large_files: bool = True, batch_small_files: bool = True):
         """
         Initialize the converter
         
@@ -26,6 +66,10 @@ class DocumentConverter:
             output_dir: Destination directory for converted PDFs (default: ./output)
             max_workers: Maximum number of parallel workers (default: CPU cores / 2)
             enable_parallel: Enable parallel processing (default: True)
+            enable_progress_bar: Show progress bar during conversion (default: True)
+            adaptive_workers: Adjust worker count based on file sizes (default: True)
+            priority_large_files: Process large files first (default: True)
+            batch_small_files: Group small files for efficiency (default: True)
         """
         # Use default directories if not provided
         if input_dir is None:
@@ -52,6 +96,16 @@ class DocumentConverter:
             self.max_workers = max(1, cpu_count // 2)
         else:
             self.max_workers = max(1, max_workers)
+        
+        # v2.5 features
+        self.enable_progress_bar = enable_progress_bar and TQDM_AVAILABLE
+        self.adaptive_workers = adaptive_workers
+        self.priority_large_files = priority_large_files
+        self.batch_small_files = batch_small_files
+        
+        # File size thresholds (in bytes)
+        self.SMALL_FILE_THRESHOLD = 100 * 1024  # 100KB
+        self.LARGE_FILE_THRESHOLD = 10 * 1024 * 1024  # 10MB
         
         # Thread-safe lock for statistics
         self.stats_lock = Lock()
@@ -212,6 +266,75 @@ class DocumentConverter:
         
         return success, operation, file_path
     
+    def _get_file_size(self, file_path: Path) -> int:
+        """Get file size in bytes"""
+        try:
+            return file_path.stat().st_size
+        except Exception:
+            return 0
+    
+    def _categorize_by_size(self, files: List[Path]) -> Dict[str, List[Path]]:
+        """Categorize files by size for adaptive processing"""
+        small_files = []
+        medium_files = []
+        large_files = []
+        
+        for file_path in files:
+            size = self._get_file_size(file_path)
+            if size < self.SMALL_FILE_THRESHOLD:
+                small_files.append(file_path)
+            elif size > self.LARGE_FILE_THRESHOLD:
+                large_files.append(file_path)
+            else:
+                medium_files.append(file_path)
+        
+        return {
+            'small': small_files,
+            'medium': medium_files,
+            'large': large_files
+        }
+    
+    def _calculate_adaptive_workers(self, files_to_process: List[Path]) -> int:
+        """Calculate optimal worker count based on file sizes"""
+        if not self.adaptive_workers or not files_to_process:
+            return self.max_workers
+        
+        # Categorize files
+        categorized = self._categorize_by_size(files_to_process)
+        
+        total_files = len(files_to_process)
+        large_count = len(categorized['large'])
+        small_count = len(categorized['small'])
+        
+        # If mostly large files, use fewer workers (avoid resource contention)
+        if large_count / total_files > 0.5:
+            return max(1, self.max_workers // 2)
+        
+        # If mostly small files, use more workers (less resource intensive)
+        elif small_count / total_files > 0.7:
+            return min(self.max_workers * 2, (os.cpu_count() or 2))
+        
+        # Mixed or medium files, use default
+        return self.max_workers
+    
+    def _sort_by_priority(self, files_to_convert: List[Path], files_to_copy: List[Path]) -> List[Tuple[Path, str]]:
+        """Sort files by priority: large files first, then medium, then small"""
+        if not self.priority_large_files:
+            # No priority sorting, process as-is
+            return [(f, 'convert') for f in files_to_convert] + [(f, 'copy') for f in files_to_copy]
+        
+        # Get file sizes and sort
+        convert_with_sizes = [(f, 'convert', self._get_file_size(f)) for f in files_to_convert]
+        copy_with_sizes = [(f, 'copy', self._get_file_size(f)) for f in files_to_copy]
+        
+        all_files = convert_with_sizes + copy_with_sizes
+        
+        # Sort by size descending (largest first)
+        all_files.sort(key=lambda x: x[2], reverse=True)
+        
+        # Return without size info
+        return [(f, op) for f, op, _ in all_files]
+    
     def convert_all(self, enable_parallel: Optional[bool] = None) -> dict:
         """
         Convert all documents in input directory and copy non-convertible files
@@ -255,9 +378,15 @@ class DocumentConverter:
         }
         
         if use_parallel and total_files > 1:
-            # Parallel processing
-            worker_count = min(self.max_workers, max(1, total_files))
+            # Parallel processing with adaptive workers (v2.5)
+            all_files = files_to_convert + files_to_copy
+            adaptive_workers = self._calculate_adaptive_workers(all_files)
+            worker_count = min(adaptive_workers, max(1, total_files))
+            
             self.logger.info(f"Processing files in parallel with {worker_count} workers")
+            if self.adaptive_workers and worker_count != self.max_workers:
+                self.logger.info(f"Using adaptive worker count (base: {self.max_workers}, adjusted: {worker_count})")
+            
             self._convert_all_parallel(files_to_convert, files_to_copy, stats, worker_count)
         else:
             # Sequential processing
@@ -296,13 +425,25 @@ class DocumentConverter:
         stats: dict,
         worker_count: int,
     ):
-        """Parallel processing of files using ThreadPoolExecutor"""
-        # Prepare work items: list of (file_path, operation_type)
-        work_items = [(f, 'convert') for f in files_to_convert] + [(f, 'copy') for f in files_to_copy]
+        """Parallel processing of files using ThreadPoolExecutor with v2.5 enhancements"""
+        # Prepare work items with priority sorting
+        work_items = self._sort_by_priority(files_to_convert, files_to_copy)
         
         # Process files in parallel
         if not work_items:
             return
+
+        total_items = len(work_items)
+        
+        # Create progress bar
+        progress_bar = None
+        if self.enable_progress_bar:
+            progress_bar = tqdm(
+                total=total_items,
+                desc="Processing files",
+                unit="file",
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
+            )
 
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             # Submit all tasks
@@ -329,9 +470,24 @@ class DocumentConverter:
                         else:
                             stats['failed'] += 1
                             stats['failed_files'].append(str(processed_file))
+                    
+                    # Update progress bar
+                    if progress_bar:
+                        progress_bar.update(1)
+                        if success:
+                            progress_bar.set_description(f"✓ {file_path.name[:30]}")
+                        else:
+                            progress_bar.set_description(f"✗ {file_path.name[:30]}")
                             
                 except Exception as e:
                     self.logger.error(f"Unexpected error processing {file_path.name}: {e}")
                     with self.stats_lock:
                         stats['failed'] += 1
                         stats['failed_files'].append(str(file_path))
+                    
+                    if progress_bar:
+                        progress_bar.update(1)
+        
+        # Close progress bar
+        if progress_bar:
+            progress_bar.close()

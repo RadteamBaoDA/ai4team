@@ -23,8 +23,8 @@ from src.document_converter import DocumentConverter
 def main():
     """Main entry point"""
     print("=" * 70)
-    print("Document to PDF Converter v2.4")
-    print("Parallel Processing | Smart Retry | Hash Optimization")
+    print("Document to PDF Converter v2.5")
+    print("Adaptive Workers | Priority Queue | Progress Bar | Persistent Cache")
     print("=" * 70)
     print()
     
