@@ -7,6 +7,11 @@ from typing import Dict, Any, List, Tuple
 logger = logging.getLogger(__name__)
 code_language = ['Python', 'C#', 'C++', 'C']
 
+# Initialize tiktoken offline mode BEFORE importing llm-guard
+# This must happen before any llm-guard imports to ensure tiktoken uses local cache
+from ..utils.tiktoken_cache import setup_tiktoken_offline_mode
+setup_tiktoken_offline_mode()
+
 # Direct imports from llm-guard
 try:
     from llm_guard.input_scanners import (
@@ -34,6 +39,8 @@ try:
     CODE_MODEL = None
     PROMPT_INJECTION_MODEL = None
     TOXICITY_MODEL = None
+    MALICIOUS_URLS_MODEL = None
+    NO_REFUSAL_MODEL = None
     
     try:
         from llm_guard.input_scanners.anonymize_helpers import DEBERTA_AI4PRIVACY_v2_CONF
@@ -54,7 +61,16 @@ try:
         from llm_guard.input_scanners.toxicity import DEFAULT_MODEL as TOXICITY_MODEL
     except (ImportError, AttributeError):
         pass
-
+    
+    try:
+        from llm_guard.output_scanners.malicious_urls import DEFAULT_MODEL as MALICIOUS_URLS_MODEL
+    except (ImportError, AttributeError):
+        pass
+    try:
+        from llm_guard.output_scanners.no_refusal import DEFAULT_MODEL as NO_REFUSAL_MODEL
+    except (ImportError, AttributeError):
+        pass
+    
     HAS_LLM_GUARD = True
     logger.info('llm-guard modules imported successfully')
     
@@ -70,7 +86,7 @@ except ImportError as e:
     scan_output = None
     # Model configuration placeholders
     DEBERTA_AI4PRIVACY_v2_CONF = None
-    CODE_MODEL = PROMPT_INJECTION_MODEL = TOXICITY_MODEL = None
+    CODE_MODEL = PROMPT_INJECTION_MODEL = TOXICITY_MODEL = MALICIOUS_URLS_MODEL = NO_REFUSAL_MODEL = None
  
 
 class LLMGuardManager:
@@ -176,7 +192,8 @@ class LLMGuardManager:
         
         # Configure local models if enabled
         if self.use_local_models:
-            self._configure_local_models()
+            self._configure_local_models_in()
+            self._configure_local_models_out()
         
         # Initialize vault for anonymization
         if self.enable_anonymize:
@@ -207,7 +224,7 @@ class LLMGuardManager:
         
         # Configure local models if needed
         if self.use_local_models and not self._initialized:
-            self._configure_local_models()
+            self._configure_local_models_in()
         
         # Initialize vault if needed for anonymization
         if self.enable_anonymize and self.vault is None:
@@ -233,14 +250,14 @@ class LLMGuardManager:
         logger.info('Lazy initializing output scanners...')
         
         # Configure local models if needed
-        if self.use_local_models and not self._initialized:
-            self._configure_local_models()
+        if self.use_local_models:
+            self._configure_local_models_out()
         
         self._init_output_scanners()
         self._output_scanners_initialized = True
         logger.info('Output scanners initialized')
 
-    def _configure_local_models(self):
+    def _configure_local_models_in(self):
         """Configure model paths and settings for local model usage with device optimization."""
         if not HAS_LLM_GUARD:
             return
@@ -282,7 +299,37 @@ class LLMGuardManager:
         except Exception as e:
             logger.exception('Failed to configure local models: %s', e)
             self.use_local_models = False
+            
+    def _configure_local_models_out(self):
+        """Configure model paths and settings for local model usage with device optimization."""
+        if not HAS_LLM_GUARD:
+            return
+            
+        try:
+            # Get base path for local models
+            models_base_path = os.environ.get('LLM_GUARD_MODELS_PATH', './models')
+            
+            device_name = 'MPS (Apple Silicon GPU)' if self.device == 'mps' else 'CPU'
+            logger.info(f'Configuring models for {device_name} inference')
+            
+            # Configure Malicious URLs model (used for output)
+            if MALICIOUS_URLS_MODEL:
+                MALICIOUS_URLS_MODEL.path = os.path.join(models_base_path, "codebert-base-Malicious_URLs")
+                MALICIOUS_URLS_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured Malicious URLs model path: {MALICIOUS_URLS_MODEL.path}')
+            
+            # Configure Code model (used for both input and output)
+            if NO_REFUSAL_MODEL:
+                NO_REFUSAL_MODEL.path = os.path.join(models_base_path, "distilroberta-base-rejection-v1")
+                NO_REFUSAL_MODEL.kwargs["local_files_only"] = True
+                logger.info(f'Configured No Refusal model path: {NO_REFUSAL_MODEL.path}')
 
+            logger.info(f'Local model configuration completed for device: {self.device}')
+            
+        except Exception as e:
+            logger.exception('Failed to configure local models: %s', e)
+            self.use_local_models = False
+            
     def _init_input_scanners(self):
         """
         Initialize input scanners for use with scan_prompt function.
@@ -359,8 +406,8 @@ class LLMGuardManager:
                     threshold=0.5,
                     model=TOXICITY_MODEL if self.use_local_models else None
                 ),
-                MaliciousURLs(),
-                NoRefusal(),
+                MaliciousURLs(model=MALICIOUS_URLS_MODEL if self.use_local_models else None),
+                NoRefusal(model=NO_REFUSAL_MODEL if self.use_local_models else None),
                 OutputCode(
                     languages=code_language,
                     is_blocked=True,

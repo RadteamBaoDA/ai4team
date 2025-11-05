@@ -1,11 +1,15 @@
 #!/bin/bash
-# download_models.sh - Download LLM Guard models for local usage
+# download_models.sh - Download LLM Guard and offline mode models for local usage
 
 set -e
 
 # Configuration
 MODELS_DIR=${LLM_GUARD_MODELS_PATH:-./models}
+TIKTOKEN_ENCODINGS="${TIKTOKEN_ENCODINGS:-cl100k_base,p50k_base,p50k_edit,r50k_base}"
 DRY_RUN=${DRY_RUN:-false}
+SKIP_TIKTOKEN=${SKIP_TIKTOKEN:-false}
+SKIP_HF=${SKIP_HF:-false}
+SKIP_LLM_GUARD=${SKIP_LLM_GUARD:-false}
 
 # Colors for output
 RED='\033[0;31m'
@@ -73,6 +77,123 @@ download_model() {
     fi
 }
 
+# Function to download tiktoken encodings
+download_tiktoken_encodings() {
+    if [ "$SKIP_TIKTOKEN" = "true" ]; then
+        log_info "Skipping tiktoken encodings (--skip-tiktoken)"
+        return 0
+    fi
+    
+    log_info "Setting up tiktoken offline mode..."
+    
+    local tiktoken_dir="$MODELS_DIR/tiktoken"
+    mkdir -p "$tiktoken_dir"
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        log_warning "DRY RUN: Would download tiktoken encodings to $tiktoken_dir"
+        return 0
+    fi
+    
+    # Use Python to download tiktoken encodings
+    python3 << EOF
+import os
+import sys
+from pathlib import Path
+
+# Add guardrails source to path
+sys.path.insert(0, 'src')
+
+try:
+    from ollama_guardrails.utils.tiktoken_cache import download_tiktoken_encoding
+    
+    cache_dir = "$tiktoken_dir"
+    encodings = "$TIKTOKEN_ENCODINGS".split(',')
+    
+    os.environ['TIKTOKEN_CACHE_DIR'] = cache_dir
+    
+    print(f"\\nDownloading tiktoken encodings to {cache_dir}...")
+    for encoding in encodings:
+        encoding = encoding.strip()
+        if encoding:
+            print(f"  - Downloading {encoding}...")
+            try:
+                result = download_tiktoken_encoding(encoding, cache_dir)
+                if result:
+                    print(f"    ✓ {encoding} downloaded")
+                else:
+                    print(f"    ✗ Failed to download {encoding}")
+            except Exception as e:
+                print(f"    ✗ Error downloading {encoding}: {e}")
+except ImportError:
+    print("Error: Could not import tiktoken utilities")
+    print("Make sure you're in the project root directory")
+    sys.exit(1)
+EOF
+    
+    return $?
+}
+
+# Function to download Hugging Face models
+download_hf_models() {
+    if [ "$SKIP_HF" = "true" ]; then
+        log_info "Skipping Hugging Face models (--skip-hf)"
+        return 0
+    fi
+    
+    if [ -z "$HF_MODELS" ]; then
+        log_info "No HF models specified (use -m/--models), skipping..."
+        return 0
+    fi
+    
+    log_info "Setting up Hugging Face offline mode..."
+    
+    local hf_dir="$MODELS_DIR/huggingface"
+    mkdir -p "$hf_dir"
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        log_warning "DRY RUN: Would download HF models to $hf_dir"
+        return 0
+    fi
+    
+    # Use Python to download HF models
+    python3 << EOF
+import os
+import sys
+from pathlib import Path
+
+# Add guardrails source to path
+sys.path.insert(0, 'src')
+
+try:
+    from ollama_guardrails.utils.huggingface_cache import download_huggingface_model
+    
+    cache_dir = "$hf_dir"
+    models = "$HF_MODELS".split(',')
+    
+    os.environ['HF_HOME'] = cache_dir
+    
+    print(f"\\nDownloading HF models to {cache_dir}...")
+    for model_id in models:
+        model_id = model_id.strip()
+        if model_id:
+            print(f"  - Downloading {model_id}...")
+            try:
+                result = download_huggingface_model(model_id, cache_dir)
+                if result:
+                    print(f"    ✓ {model_id} downloaded")
+                else:
+                    print(f"    ✗ Failed to download {model_id}")
+            except Exception as e:
+                print(f"    ✗ Error downloading {model_id}: {e}")
+except ImportError:
+    print("Error: Could not import Hugging Face utilities")
+    print("Make sure you're in the project root directory")
+    sys.exit(1)
+EOF
+    
+    return $?
+}
+
 # Function to check disk space
 check_disk_space() {
     local required_space_gb=10  # Estimate 10GB for all models
@@ -128,23 +249,34 @@ setup_git_lfs() {
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "Download LLM Guard models for local usage"
+    echo "Download LLM Guard models and offline mode resources"
     echo ""
     echo "Options:"
-    echo "  -h, --help          Show this help message"
-    echo "  -d, --dir DIR       Set models directory (default: ./models)"
-    echo "  --dry-run           Show what would be done without actually doing it"
-    echo "  --check-only        Only check prerequisites, don't download"
+    echo "  -h, --help              Show this help message"
+    echo "  -d, --dir DIR           Set models directory (default: ./models)"
+    echo "  -e, --encodings ENCS    Tiktoken encodings to download (comma-separated)"
+    echo "                          (default: cl100k_base,p50k_base,p50k_edit,r50k_base)"
+    echo "  -m, --models MODELS     HF models to download (comma-separated)"
+    echo "  --skip-tiktoken         Skip tiktoken encoding download"
+    echo "  --skip-hf               Skip HF model download"
+    echo "  --skip-guard            Skip LLM Guard model download"
+    echo "  --dry-run               Show what would be done without actually doing it"
+    echo "  --check-only            Only check prerequisites, don't download"
     echo ""
     echo "Environment Variables:"
     echo "  LLM_GUARD_MODELS_PATH   Models directory path"
+    echo "  TIKTOKEN_ENCODINGS      Tiktoken encodings to download (comma-separated)"
     echo "  DRY_RUN                 Set to 'true' for dry run"
+    echo "  SKIP_TIKTOKEN           Set to 'true' to skip tiktoken"
+    echo "  SKIP_HF                 Set to 'true' to skip HF models"
+    echo "  SKIP_LLM_GUARD          Set to 'true' to skip LLM Guard models"
     echo ""
     echo "Examples:"
-    echo "  $0                      # Download to ./models"
+    echo "  $0                      # Download all models"
     echo "  $0 -d /opt/models       # Download to /opt/models"
     echo "  $0 --dry-run            # Show what would be downloaded"
-    echo "  LLM_GUARD_MODELS_PATH=/data/models $0  # Use environment variable"
+    echo "  $0 --skip-guard         # Only download tiktoken and HF models"
+    echo "  $0 -m bert-base-uncased -e cl100k_base  # Specific models/encodings"
 }
 
 # Parse command line arguments
@@ -157,6 +289,26 @@ while [[ $# -gt 0 ]]; do
         -d|--dir)
             MODELS_DIR="$2"
             shift 2
+            ;;
+        -e|--encodings)
+            TIKTOKEN_ENCODINGS="$2"
+            shift 2
+            ;;
+        -m|--models)
+            HF_MODELS="$2"
+            shift 2
+            ;;
+        --skip-tiktoken)
+            SKIP_TIKTOKEN=true
+            shift
+            ;;
+        --skip-hf)
+            SKIP_HF=true
+            shift
+            ;;
+        --skip-guard)
+            SKIP_LLM_GUARD=true
+            shift
             ;;
         --dry-run)
             DRY_RUN=true
@@ -176,8 +328,8 @@ done
 
 # Main execution
 main() {
-    log_info "LLM Guard Models Download Script"
-    log_info "================================"
+    log_info "LLM Guard + Offline Mode Models Download Script"
+    log_info "==============================================="
     log_info "Models directory: $MODELS_DIR"
     log_info "Dry run: $DRY_RUN"
     echo ""
@@ -206,48 +358,69 @@ main() {
     log_info "Starting model downloads..."
     echo ""
     
-    # Download models
-    # Model definitions: URL, local_name, description
-    models=(
-        "https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2 deberta-v3-base-prompt-injection-v2 PromptInjection_Scanner_Model"
-        "https://huggingface.co/unitary/unbiased-toxic-roberta unbiased-toxic-roberta Toxicity_Scanner_Model"
-        "https://huggingface.co/philomath-1209/programming-language-identification programming-language-identification Code_Scanner_Model"
-        "https://huggingface.co/Isotonic/deberta-v3-base_finetuned_ai4privacy_v2 deberta-v3-base_finetuned_ai4privacy_v2 Anonymize_Scanner_Model"
-    )
+    # Download offline mode resources
+    echo ""
+    log_info "Step 1: Downloading Offline Mode Resources"
+    log_info "==========================================="
+    download_tiktoken_encodings || true
+    download_hf_models || true
     
-    failed_downloads=0
+    echo ""
     
-    for model_info in "${models[@]}"; do
-        # Parse model info
-        read -r repo_url local_name description <<< "$model_info"
+    # Download LLM Guard models
+    if [ "$SKIP_LLM_GUARD" != "true" ]; then
+        log_info "Step 2: Downloading LLM Guard Models"
+        log_info "===================================="
         
-        if ! download_model "$repo_url" "$local_name" "$description"; then
-            ((failed_downloads++))
-        fi
-        echo ""
-    done
+        # Model definitions: URL, local_name, description
+        models=(
+            "https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2 deberta-v3-base-prompt-injection-v2 PromptInjection_Scanner_Model"
+            "https://huggingface.co/unitary/unbiased-toxic-roberta unbiased-toxic-roberta Toxicity_Scanner_Model"
+            "https://huggingface.co/philomath-1209/programming-language-identification programming-language-identification Code_Scanner_Model"
+            "https://huggingface.co/Isotonic/deberta-v3-base_finetuned_ai4privacy_v2 deberta-v3-base_finetuned_ai4privacy_v2 Anonymize_Scanner_Model"
+        )
+        
+        failed_downloads=0
+        
+        for model_info in "${models[@]}"; do
+            # Parse model info
+            read -r repo_url local_name description <<< "$model_info"
+            
+            if ! download_model "$repo_url" "$local_name" "$description"; then
+                ((failed_downloads++))
+            fi
+            echo ""
+        done
+    else
+        log_info "Skipping LLM Guard models (--skip-guard)"
+        failed_downloads=0
+    fi
     
     # Summary
     echo ""
     log_info "Download Summary"
-    log_info "==============="
+    log_info "================"
     
-    total_models=${#models[@]}
-    successful_downloads=$((total_models - failed_downloads))
-    
-    log_info "Total models: $total_models"
-    log_info "Successful downloads: $successful_downloads"
-    
-    if [ $failed_downloads -gt 0 ]; then
-        log_error "Failed downloads: $failed_downloads"
+    if [ "$SKIP_LLM_GUARD" != "true" ]; then
+        total_models=${#models[@]}
+        successful_downloads=$((total_models - failed_downloads))
+        log_info "LLM Guard models: $successful_downloads/$total_models downloaded"
+        if [ $failed_downloads -gt 0 ]; then
+            log_error "  Failed: $failed_downloads"
+        fi
     fi
     
-    if [ "$DRY_RUN" != "true" ] && [ $failed_downloads -eq 0 ]; then
+    log_info "Offline mode resources: tiktoken + Hugging Face"
+    
+    if [ "$DRY_RUN" != "true" ] && ([ "$SKIP_LLM_GUARD" = "true" ] || [ $failed_downloads -eq 0 ]); then
         echo ""
-        log_success "All models downloaded successfully!"
-        log_info "You can now enable local models with:"
+        log_success "All downloads completed successfully!"
+        log_info "You can now enable offline mode with:"
+        log_info "  export TIKTOKEN_CACHE_DIR=$MODELS_DIR/tiktoken"
+        log_info "  export HF_HOME=$MODELS_DIR/huggingface"
+        log_info "  export TIKTOKEN_OFFLINE_MODE=true"
+        log_info "  export HF_OFFLINE=true"
         log_info "  export LLM_GUARD_USE_LOCAL_MODELS=true"
-        log_info "  export LLM_GUARD_MODELS_PATH=$MODELS_DIR"
         
         # Show disk usage
         if command_exists du; then
@@ -256,8 +429,9 @@ main() {
         fi
         
         echo ""
-        log_info "To test the configuration, run:"
-        log_info "  python test_local_models.py"
+        log_info "Or use the setup scripts:"
+        log_info "  ./scripts/init_tiktoken_new.sh ./models"
+        log_info "  ./scripts/init_all_offline.bat models"
         
     elif [ "$DRY_RUN" = "true" ]; then
         echo ""

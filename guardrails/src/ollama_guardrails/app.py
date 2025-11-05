@@ -22,7 +22,13 @@ from .core.config import Config
 from .guards.guard_manager import LLMGuardManager
 from .middleware.http_client import close_http_client, get_http_client
 from .middleware.ip_whitelist import IPWhitelist
-from .utils import extract_client_ip
+from .utils import extract_client_ip, force_cpu_mode
+
+# Force CPU mode if requested via environment variable
+if os.environ.get('LLM_GUARD_FORCE_CPU', '').lower() in ('1', 'true', 'yes', 'on'):
+    force_cpu_mode(verbose=True)
+elif os.environ.get('LLM_GUARD_DEVICE', '').lower() == 'cpu':
+    force_cpu_mode(verbose=False)
 
 # Import endpoint modules
 from .api.endpoints_admin import create_admin_endpoints

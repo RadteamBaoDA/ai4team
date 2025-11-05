@@ -79,6 +79,15 @@ for %%P in (8080 8081 8082) do (
     
     echo [INFO] Starting proxy on port !PORT!...
     
+    REM Set offline mode environment variables
+    set TIKTOKEN_CACHE_DIR=%TIKTOKEN_CACHE_DIR:~0,-1%.\models\tiktoken
+    set TIKTOKEN_OFFLINE_MODE=true
+    set HF_HOME=%HF_HOME:~0,-1%.\models\huggingface
+    set HF_OFFLINE=true
+    set TRANSFORMERS_OFFLINE=true
+    set HF_DATASETS_OFFLINE=true
+    set HF_HUB_OFFLINE=true
+    
     REM Start in new window
     start "Ollama Guard Proxy !PORT!" ^
         cmd /k "cd /d "%SCRIPT_DIR%" && run_proxy.bat --port !PORT! --workers 4 --log-level info"

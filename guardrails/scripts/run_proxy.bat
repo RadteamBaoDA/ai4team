@@ -164,6 +164,27 @@ if not defined IP_BLACKLIST set "IP_BLACKLIST="
 set "PROXY_PORT=%PORT%"
 set "CONFIG_FILE=%CONFIG_FILE%"
 
+REM Force Transformers to Use CPU (Primary Settings)
+if not defined LLM_GUARD_DEVICE set "LLM_GUARD_DEVICE=cpu"
+set "CUDA_VISIBLE_DEVICES="
+set "CUDA_LAUNCH_BLOCKING=1"
+set "DISABLE_FLASH_ATTENTION=1"
+if not defined TORCH_DEVICE set "TORCH_DEVICE=cpu"
+
+REM Tiktoken Offline Mode Configuration
+if not defined TIKTOKEN_CACHE_DIR set "TIKTOKEN_CACHE_DIR=%PROJECT_ROOT%\models\tiktoken"
+if not defined TIKTOKEN_OFFLINE_MODE set "TIKTOKEN_OFFLINE_MODE=true"
+if not defined TIKTOKEN_FALLBACK_LOCAL set "TIKTOKEN_FALLBACK_LOCAL=true"
+
+REM Hugging Face Offline Mode Configuration
+if not defined HF_HOME set "HF_HOME=%PROJECT_ROOT%\models\huggingface"
+if not defined HF_OFFLINE set "HF_OFFLINE=true"
+if not defined TRANSFORMERS_OFFLINE set "TRANSFORMERS_OFFLINE=true"
+if not defined HF_DATASETS_OFFLINE set "HF_DATASETS_OFFLINE=true"
+if not defined HF_HUB_OFFLINE set "HF_HUB_OFFLINE=true"
+if not defined TRANSFORMERS_CACHE set "TRANSFORMERS_CACHE=%PROJECT_ROOT%\models\huggingface\transformers"
+if not defined HF_DATASETS_CACHE set "HF_DATASETS_CACHE=%PROJECT_ROOT%\models\huggingface\datasets"
+
 REM Build uvicorn command to run via the selected Python interpreter (ensures venv packages are used)
 set "UVICORN_CMD=%PYTHON_CMD% -m uvicorn %PROXY_MODULE%"
 set "UVICORN_CMD=!UVICORN_CMD! --host %HOST%"
@@ -234,6 +255,13 @@ if "%IP_BLACKLIST%"=="" (
 ) else (
   echo   IP_BLACKLIST:            %IP_BLACKLIST%
 )
+echo.
+echo Offline Mode Configuration:
+echo   TIKTOKEN_CACHE_DIR:     %TIKTOKEN_CACHE_DIR%
+echo   TIKTOKEN_OFFLINE_MODE:  %TIKTOKEN_OFFLINE_MODE%
+echo   HF_HOME:                %HF_HOME%
+echo   HF_OFFLINE:             %HF_OFFLINE%
+echo   TRANSFORMERS_OFFLINE:   %TRANSFORMERS_OFFLINE%
 echo ════════════════════════════════════════════════════════════════
 echo Testing proxy:
 echo   curl http://%HOST%:%PORT%/health

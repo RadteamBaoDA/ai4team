@@ -121,8 +121,18 @@ start_proxy_instances() {
         
         log_info "Starting proxy on port $port..."
         
-        # Start proxy in background
+        # Start proxy in background with offline mode environment variables
         cd "$SCRIPT_DIR"
+        
+        # Set offline mode environment variables for this proxy instance
+        export TIKTOKEN_CACHE_DIR="${TIKTOKEN_CACHE_DIR:-./models/tiktoken}"
+        export TIKTOKEN_OFFLINE_MODE="${TIKTOKEN_OFFLINE_MODE:-true}"
+        export HF_HOME="${HF_HOME:-./models/huggingface}"
+        export HF_OFFLINE="${HF_OFFLINE:-true}"
+        export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-true}"
+        export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-true}"
+        export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-true}"
+        
         ./run_proxy.sh --port "$port" --workers 4 --log-level info > "$log_file" 2>&1 &
         local new_pid=$!
         echo "$new_pid" > "$pid_file"

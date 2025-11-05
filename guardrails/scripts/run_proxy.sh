@@ -87,6 +87,27 @@ export_variables() {
     export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-True}"
     export SCAN_FAIL_FAST="${SCAN_FAIL_FAST:-True}"
     
+    # Force Transformers to Use CPU (Primary Setting)
+    export LLM_GUARD_DEVICE="${LLM_GUARD_DEVICE:-cpu}"
+    export CUDA_VISIBLE_DEVICES=""           # Disable GPU access
+    export CUDA_LAUNCH_BLOCKING="1"          # Force synchronous CUDA (if attempted)
+    export DISABLE_FLASH_ATTENTION="1"       # Disable Flash Attention on CPU
+    export TORCH_DEVICE="${TORCH_DEVICE:-cpu}"  # Force PyTorch to CPU
+    
+    # Tiktoken Offline Mode Configuration
+    export TIKTOKEN_CACHE_DIR="${TIKTOKEN_CACHE_DIR:-$PROJECT_ROOT/models/tiktoken_cache}"
+    export TIKTOKEN_OFFLINE_MODE="${TIKTOKEN_OFFLINE_MODE:-true}"
+    export TIKTOKEN_FALLBACK_LOCAL="${TIKTOKEN_FALLBACK_LOCAL:-true}"
+    
+    # Hugging Face Offline Mode Configuration
+    export HF_HOME="${HF_HOME:-$PROJECT_ROOT/models/huggingface}"
+    export HF_OFFLINE="${HF_OFFLINE:-true}"
+    export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-true}"
+    export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-true}"
+    export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-true}"
+    export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$PROJECT_ROOT/models/huggingface/transformers}"
+    export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$PROJECT_ROOT/models/huggingface/datasets}"
+    
     # Cache configuration
     export CACHE_ENABLED="${CACHE_ENABLED:-true}"
     export CACHE_BACKEND="${CACHE_BACKEND:-auto}"

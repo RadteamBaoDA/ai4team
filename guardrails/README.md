@@ -121,6 +121,40 @@ nginx_whitelist:
 - `GET /config` - Current configuration
 - `POST /admin/cache/clear` - Clear cache
 
+## Offline Mode
+
+For offline operation and to avoid downloading models from Azure or Hugging Face, configure both tiktoken and Hugging Face to use local cache:
+
+**Quick Setup (Recommended):**
+
+```bash
+# Linux/macOS - Setup both tiktoken and Hugging Face
+./init_tiktoken_new.sh
+
+# Windows - Setup both tiktoken and Hugging Face
+init_all_offline.bat
+
+# Or use Python to setup both with custom models
+python setup_tiktoken.py --models bert-base-uncased sentence-transformers/all-mpnet-base-v2
+
+# Or use Python CLI directly
+python -m ollama_guardrails tiktoken-download
+python -m ollama_guardrails hf-download -m bert-base-uncased
+```
+
+**Verify setup:**
+```bash
+python -m ollama_guardrails tiktoken-info
+python -m ollama_guardrails hf-info
+```
+
+**Start server** - uses local cache automatically:
+```bash
+python -m ollama_guardrails server
+```
+
+For complete setup guide, see [Tiktoken Setup Guide](docs/TIKTOKEN_SETUP_GUIDE.md) and [Tiktoken Offline Mode Documentation](docs/TIKTOKEN_OFFLINE_MODE.md).
+
 ## Development
 
 ### Project Structure

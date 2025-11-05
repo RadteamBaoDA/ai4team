@@ -1,8 +1,8 @@
 @echo off
-REM Setup script for Ollama Guard Proxy with Concurrent Request Handling
+REM Setup script for Ollama Guard Proxy with Offline Mode and Concurrent Request Handling
 
 echo =========================================
-echo Ollama Guard Proxy - Concurrency Setup
+echo Ollama Guard Proxy - Setup
 echo =========================================
 echo.
 
@@ -36,6 +36,14 @@ echo Installing dependencies...
 pip install -r requirements.txt
 
 echo [OK] Dependencies installed
+echo.
+
+REM Setup offline mode
+echo Setting up offline mode...
+if not exist "models\tiktoken" mkdir "models\tiktoken"
+if not exist "models\huggingface\transformers" mkdir "models\huggingface\transformers"
+if not exist "models\huggingface\datasets" mkdir "models\huggingface\datasets"
+echo [OK] Offline mode directories created
 echo.
 
 REM Check configuration
@@ -72,15 +80,22 @@ echo =========================================
 echo Setup Complete!
 echo =========================================
 echo.
+echo Offline Mode Configuration:
+echo   Tiktoken cache:       .\models\tiktoken
+echo   HF transformers:      .\models\huggingface\transformers
+echo   HF datasets:          .\models\huggingface\datasets
+echo.
 echo Next steps:
-echo   1. Review config.yaml for concurrency settings
-echo   2. Start the proxy: run_proxy.bat
-echo   3. Check health: curl http://localhost:8080/health
-echo   4. Monitor queues: curl http://localhost:8080/queue/stats
+echo   1. Download offline models:
+echo      .\scripts\download_models.sh
+echo   2. Review config.yaml for concurrency settings
+echo   3. Start the proxy: run_proxy.bat
+echo   4. Check health: curl http://localhost:8080/health
+echo   5. Monitor queues: curl http://localhost:8080/queue/stats
 echo.
 echo Documentation:
 echo   - Concurrency Guide: docs\CONCURRENCY_GUIDE.md
 echo   - Quick Reference: docs\CONCURRENCY_QUICKREF.md
-echo   - Update Summary: CONCURRENCY_UPDATE.md
+echo   - Offline Mode: docs\TIKTOKEN_OFFLINE_MODE.md
 echo.
 pause

@@ -197,6 +197,20 @@ setup_environment() {
     export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-false}"
     export LLM_GUARD_MODELS_PATH="$MODELS_DIR"
     
+    # Tiktoken Offline Mode Configuration
+    export TIKTOKEN_CACHE_DIR="${TIKTOKEN_CACHE_DIR:-$PROJECT_ROOT/models/tiktoken}"
+    export TIKTOKEN_OFFLINE_MODE="${TIKTOKEN_OFFLINE_MODE:-true}"
+    export TIKTOKEN_FALLBACK_LOCAL="${TIKTOKEN_FALLBACK_LOCAL:-true}"
+    
+    # Hugging Face Offline Mode Configuration
+    export HF_HOME="${HF_HOME:-$PROJECT_ROOT/models/huggingface}"
+    export HF_OFFLINE="${HF_OFFLINE:-true}"
+    export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-true}"
+    export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-true}"
+    export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-true}"
+    export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$PROJECT_ROOT/models/huggingface/transformers}"
+    export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$PROJECT_ROOT/models/huggingface/datasets}"
+    
     # Cache configuration
     export CACHE_ENABLED="${CACHE_ENABLED:-true}"
     export CACHE_BACKEND="${CACHE_BACKEND:-auto}"
@@ -225,6 +239,8 @@ setup_environment() {
     log_info "Device: ${LLM_GUARD_DEVICE}"
     log_info "Threads per worker: $CPU_CORES"
     log_info "Concurrency: Parallel=${OLLAMA_NUM_PARALLEL}, Queue=${OLLAMA_MAX_QUEUE}"
+    log_info "Tiktoken offline: ${TIKTOKEN_OFFLINE_MODE} (Cache: ${TIKTOKEN_CACHE_DIR})"
+    log_info "HF offline: ${HF_OFFLINE} (Home: ${HF_HOME})"
     
     echo ""
 }
