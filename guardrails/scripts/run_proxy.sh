@@ -67,6 +67,11 @@ CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/config/config.yaml}"
 PROXY_MODULE="ollama_guardrails.app:app"
 LLM_GUARD_USE_LOCAL_MODELS="True"
 SCAN_FAIL_FAST="True"
+
+# Concurrency monitoring
+ENABLE_CONCURRENCY_MONITOR="${ENABLE_CONCURRENCY_MONITOR:-true}"
+MONITOR_UPDATE_INTERVAL="${MONITOR_UPDATE_INTERVAL:-5.0}"
+DEBUG="${DEBUG:-false}"
 # Command to execute (start, stop, restart, status, logs, run)
 COMMAND="${1:-help}"
 shift 1 >/dev/null 2>&1 || true
@@ -121,6 +126,11 @@ export_variables() {
     export REDIS_DB="${REDIS_DB:-0}"
     export REDIS_PASSWORD="${REDIS_PASSWORD:-}"
     export REDIS_MAX_CONNECTIONS="${REDIS_MAX_CONNECTIONS:-50}"
+    
+    # Concurrency monitoring
+    export ENABLE_CONCURRENCY_MONITOR="${ENABLE_CONCURRENCY_MONITOR:-true}"
+    export MONITOR_UPDATE_INTERVAL="${MONITOR_UPDATE_INTERVAL:-5.0}"
+    export DEBUG="${DEBUG:-false}"
     
     # Concurrency configuration (Ollama-style)
     export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-auto}"
@@ -330,10 +340,13 @@ run_foreground() {
         RELOAD="true"; shift
         ;;
       --debug)
-        LOG_LEVEL="debug"; shift
+        LOG_LEVEL="debug"; DEBUG="true"; shift
         ;;
       --config)
         CONFIG_FILE="$2"; shift 2
+        ;;
+      --monitor-interval)
+        MONITOR_UPDATE_INTERVAL="$2"; shift 2
         ;;
       --help|-h)
         show_help
@@ -369,8 +382,9 @@ Run Mode Options (with 'run' command):
   --port PORT              Server port (default: 9999)
   --log-level LEVEL        Logging level: debug, info, warning, error (default: info)
   --reload                 Auto-reload on code changes (development only)
-  --debug                  Enable debug logging
+  --debug                  Enable debug logging + concurrency monitoring
   --config FILE            Config file path (default: config.yaml)
+  --monitor-interval SEC   Concurrency monitor update interval in seconds (default: 5.0)
   --help                   Show this help message
 
 Examples:
@@ -412,6 +426,11 @@ Environment Variables:
   USE_VENV                   true/false - Enable/disable venv activation
                              (default: true)
   LLM_GUARD_USE_LOCAL_MODELS true/false - Enable/disable local models
+  
+Concurrency & Monitoring Variables:
+  ENABLE_CONCURRENCY_MONITOR true/false - Enable real-time concurrency tracking
+  MONITOR_UPDATE_INTERVAL    Update interval in seconds (default: 5.0)
+  DEBUG                      true/false - Enable debug logging with metrics
   
 Concurrency Variables (Ollama-style):
   OLLAMA_NUM_PARALLEL        Max parallel requests per model
@@ -519,8 +538,7 @@ run_interactive() {
   echo ""
 
   # Run Uvicorn with configuration
-  run_server
-}
+  run_server}
 
 # Main command dispatch
 case "$COMMAND" in

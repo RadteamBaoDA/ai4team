@@ -24,6 +24,23 @@ from .middleware.http_client import close_http_client, get_http_client
 from .middleware.ip_whitelist import IPWhitelist
 from .utils import extract_client_ip, force_cpu_mode
 
+# Initialize offline mode for tiktoken and Hugging Face BEFORE importing llm-guard
+# (Using early initialization before logger is available)
+try:
+    from .utils.tiktoken_cache import setup_tiktoken_offline_mode
+    from .utils.huggingface_cache import setup_huggingface_offline_mode
+    
+    # Setup tiktoken offline mode (also sets up HF)
+    if os.environ.get('TIKTOKEN_OFFLINE_MODE', '').lower() in ('1', 'true', 'yes', 'on', ''):
+        setup_tiktoken_offline_mode()
+    
+    # Also explicitly setup HF if requested
+    if os.environ.get('HF_OFFLINE', '').lower() in ('1', 'true', 'yes', 'on'):
+        setup_huggingface_offline_mode()
+except (ImportError, Exception):
+    # Silently fail early - will be logged after logger is initialized
+    pass
+
 # Force CPU mode if requested via environment variable
 if os.environ.get('LLM_GUARD_FORCE_CPU', '').lower() in ('1', 'true', 'yes', 'on'):
     force_cpu_mode(verbose=True)
@@ -60,6 +77,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Lifespan context manager for startup and shutdown events."""
     # Startup
     logger.info("Application starting up...")
+    
+    # Log offline mode configuration
+    tiktoken_cache = os.environ.get('TIKTOKEN_CACHE_DIR', './models/tiktoken')
+    hf_home = os.environ.get('HF_HOME', './models/huggingface')
+    tiktoken_offline = os.environ.get('TIKTOKEN_OFFLINE_MODE', 'true').lower() in ('1', 'true', 'yes', 'on')
+    hf_offline = os.environ.get('HF_OFFLINE', 'true').lower() in ('1', 'true', 'yes', 'on')
+    
+    if tiktoken_offline or hf_offline:
+        logger.info("Offline mode configuration:")
+        if tiktoken_offline:
+            logger.info(f"  - Tiktoken cache: {tiktoken_cache}")
+        if hf_offline:
+            logger.info(f"  - Hugging Face cache: {hf_home}")
     
     # Initialize the HTTP client on startup
     get_http_client()

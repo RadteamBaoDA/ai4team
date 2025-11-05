@@ -8,7 +8,7 @@ and reduces network dependencies.
 Also initializes Hugging Face offline mode for transformer models.
 
 Environment Variables:
-    TIKTOKEN_CACHE_DIR: Path to local tiktoken cache directory (default: ./models/tiktoken)
+    TIKTOKEN_CACHE_DIR: Path to local tiktoken cache directory (default: ./models/tiktoken_cache)
     TIKTOKEN_OFFLINE_MODE: Enable offline mode (default: true)
     TIKTOKEN_FALLBACK_LOCAL: Use local models as fallback (default: true)
     HF_HOME: Hugging Face home directory (default: ./models/huggingface)
@@ -46,7 +46,7 @@ def setup_tiktoken_offline_mode(cache_dir: Optional[str] = None) -> bool:
     
     Args:
         cache_dir: Optional path to tiktoken cache directory.
-                   If None, uses TIKTOKEN_CACHE_DIR env var or default './models/tiktoken'
+                   If None, uses TIKTOKEN_CACHE_DIR env var or default './models/tiktoken_cache'
     
     Returns:
         bool: True if offline mode was successfully configured, False otherwise
@@ -63,7 +63,7 @@ def setup_tiktoken_offline_mode(cache_dir: Optional[str] = None) -> bool:
         
         # Determine cache directory
         if cache_dir is None:
-            cache_dir = os.environ.get('TIKTOKEN_CACHE_DIR', './models/tiktoken')
+            cache_dir = os.environ.get('TIKTOKEN_CACHE_DIR', './models/tiktoken_cache')
         
         cache_dir = os.path.abspath(cache_dir)
         
@@ -125,8 +125,8 @@ def download_tiktoken_encoding(encoding_name: str = 'cl100k_base',
     
     Example:
         >>> from ollama_guardrails.utils.tiktoken_cache import download_tiktoken_encoding
-        >>> download_tiktoken_encoding('cl100k_base', './models/tiktoken')
-        >>> download_tiktoken_encoding('p50k_base', './models/tiktoken')
+        >>> download_tiktoken_encoding('cl100k_base', './models/tiktoken_cache')
+        >>> download_tiktoken_encoding('p50k_base', './models/tiktoken_cache')
     """
     try:
         # Setup offline mode first
@@ -159,7 +159,7 @@ def get_tiktoken_cache_info() -> dict:
     Returns:
         dict: Information about tiktoken cache setup
     """
-    cache_dir = os.environ.get('TIKTOKEN_CACHE_DIR', './models/tiktoken')
+    cache_dir = os.environ.get('TIKTOKEN_CACHE_DIR', './models/tiktoken_cache_cache')
     cache_dir = os.path.abspath(cache_dir)
     
     # Check what encodings are cached
