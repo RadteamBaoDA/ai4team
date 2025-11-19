@@ -20,7 +20,6 @@ try:
         Toxicity as InputToxicity,
         Secrets,
         Code as InputCode,
-        TokenLimit,
         Anonymize,
     )
     from llm_guard.output_scanners import (
@@ -383,9 +382,6 @@ class LLMGuardManager:
                 )
             else:
                 logger.info('Input Code scanner disabled via configuration')
-            
-            # TokenLimit scanner
-            self.input_scanners.append(TokenLimit(limit=4000))
             
             # Add Anonymize scanner if vault is available
             if self.enable_anonymize and self.vault:
