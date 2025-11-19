@@ -136,6 +136,7 @@ def create_app(config_file: str | None = None) -> FastAPI:
         enable_input=config.get_bool("enable_input_guard", True),
         enable_output=config.get_bool("enable_output_guard", True),
         lazy_init=False,  # Scanners initialize at startup
+        enable_input_code_scanner=config.get_bool("enable_input_code_scanner", False),
     )
 
     # Initialize IP whitelist (nginx only)

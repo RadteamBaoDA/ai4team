@@ -2,7 +2,7 @@ import logging
 import os
 import platform
 import asyncio
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 code_language = ['Python', 'C#', 'C++', 'C']
@@ -90,7 +90,14 @@ except ImportError as e:
  
 
 class LLMGuardManager:
-    def __init__(self, enable_input: bool = True, enable_output: bool = True, enable_anonymize: bool = True, lazy_init: bool = True):
+    def __init__(
+        self,
+        enable_input: bool = True,
+        enable_output: bool = True,
+    enable_anonymize: bool = True,
+    lazy_init: bool = True,
+    enable_input_code_scanner: Optional[bool] = False,
+    ):
         """
         Initialize LLM Guard Manager with input and output scanning capabilities.
         
@@ -107,6 +114,13 @@ class LLMGuardManager:
         self.enable_output = enable_output and HAS_LLM_GUARD
         self.enable_anonymize = enable_anonymize and HAS_LLM_GUARD
         self.lazy_init = lazy_init
+        if enable_input_code_scanner is None:
+            env_flag = os.environ.get('LLM_GUARD_ENABLE_INPUT_CODE_SCANNER')
+            if env_flag is None:
+                enable_input_code_scanner = True
+            else:
+                enable_input_code_scanner = env_flag.lower() in ('1', 'true', 'yes', 'on')
+        self.enable_input_code_scanner = bool(enable_input_code_scanner) and HAS_LLM_GUARD
         self.scan_fail_fast = os.environ.get('LLM_GUARD_FAST_FAIL', 'true').lower() in ('1', 'true', 'yes', 'on')
         logger.info(f'Fast fail enabled: {self.scan_fail_fast}')
         # Lazy initialization flags
@@ -359,14 +373,16 @@ class LLMGuardManager:
             # Secrets scanner
             self.input_scanners.append(Secrets())
             
-            # Code scanner with local model support
-            self.input_scanners.append(
-                InputCode(
-                    languages=code_language,
-                    is_blocked=True,
-                    model=CODE_MODEL if self.use_local_models else None
+            if self.enable_input_code_scanner:
+                self.input_scanners.append(
+                    InputCode(
+                        languages=code_language,
+                        is_blocked=True,
+                        model=CODE_MODEL if self.use_local_models else None
+                    )
                 )
-            )
+            else:
+                logger.info('Input Code scanner disabled via configuration')
             
             # TokenLimit scanner
             self.input_scanners.append(TokenLimit(limit=4000))
