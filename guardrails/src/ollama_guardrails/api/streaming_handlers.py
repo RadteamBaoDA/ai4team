@@ -16,6 +16,11 @@ from typing import Dict, Any
 import httpx
 
 from ..utils.language import LanguageDetector
+from ..utils import (
+    inline_guard_errors_enabled,
+    extract_failed_scanners,
+    format_markdown_error,
+)
 
 logger = logging.getLogger(__name__)
 min_output_length = 50
@@ -35,6 +40,8 @@ async def stream_response_with_guard(response: httpx.Response, guard_manager, co
     accumulated_text = ""
     blocked = False
     
+    inline_guard = inline_guard_errors_enabled(config)
+
     try:
         async for line in response.aiter_lines():
             if not line:
@@ -62,19 +69,13 @@ async def stream_response_with_guard(response: httpx.Response, guard_manager, co
                 if not output_result['allowed']:
                     logger.warning(f"Streaming output blocked by LLM Guard: {output_result}")
                     blocked = True
-                    
-                    # Extract failed scanners
-                    failed_scanners = []
-                    for scanner_name, info in output_result.get('scanners', {}).items():
-                        if not info.get('passed', True):
-                            failed_scanners.append({
-                                "scanner": scanner_name,
-                                "reason": info.get('reason', 'Content policy violation'),
-                                "score": info.get('score')
-                            })
+                    failed_scanners = extract_failed_scanners(output_result)
                     
                     # Get localized error message
                     error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                    markdown_body = None
+                    if inline_guard:
+                        markdown_body = format_markdown_error("Content policy violation", error_message, failed_scanners)
                     
                     # Send error as last chunk
                     error_chunk = {
@@ -83,6 +84,7 @@ async def stream_response_with_guard(response: httpx.Response, guard_manager, co
                         "message": error_message,
                         "language": detected_lang,
                         "failed_scanners": failed_scanners,
+                        "markdown": markdown_body,
                         "done": True
                     }
                     yield (json.dumps(error_chunk) + '\n')
@@ -140,6 +142,7 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
     sent_role_chunk = False
     block_on_error = config.get('block_on_guard_error', False)
     blocked = False
+    inline_guard = inline_guard_errors_enabled(config)
 
     try:
         async for raw_line in response.aiter_lines():
@@ -206,36 +209,47 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
                     if not scan_result.get('allowed', True):
                         logger.warning("Streaming OpenAI output blocked by LLM Guard: %s", scan_result)
                         blocked = True
-                        
-                        # Extract failed scanners
-                        failed_scanners = []
-                        for scanner_name, info in scan_result.get('scanners', {}).items():
-                            if not info.get('passed', True):
-                                failed_scanners.append({
-                                    "scanner": scanner_name,
-                                    "reason": info.get('reason', 'Content policy violation')
-                                })
-                        
+                        failed_scanners = extract_failed_scanners(scan_result)
                         error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
-                        block_chunk = {
-                            "id": completion_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_ts,
-                            "model": model,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {},
-                                    "finish_reason": "content_filter"
-                                }
-                            ],
-                            "error": {
-                                "message": error_message,
-                                "type": "content_policy_violation",
-                                "code": "output_blocked",
-                                "failed_scanners": failed_scanners
+                        markdown_body = format_markdown_error("Content policy violation", error_message, failed_scanners)
+
+                        if inline_guard:
+                            block_chunk = {
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_ts,
+                                "model": model,
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "content": markdown_body
+                                        },
+                                        "finish_reason": "content_filter"
+                                    }
+                                ],
+                                "guard": scan_result
                             }
-                        }
+                        else:
+                            block_chunk = {
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_ts,
+                                "model": model,
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {},
+                                        "finish_reason": "content_filter"
+                                    }
+                                ],
+                                "error": {
+                                    "message": error_message,
+                                    "type": "content_policy_violation",
+                                    "code": "output_blocked",
+                                    "failed_scanners": failed_scanners
+                                }
+                            }
                         yield format_sse_event(block_chunk)
                         yield b"data: [DONE]\n\n"
                         
@@ -275,7 +289,10 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
                     if not scan_result.get('allowed', True):
                         logger.warning("Final OpenAI streaming output blocked: %s", scan_result)
                         blocked = True
+                        failed_scanners = extract_failed_scanners(scan_result)
                         error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                        markdown_body = format_markdown_error("Content policy violation", error_message, failed_scanners)
+                        delta_content = markdown_body if inline_guard else error_message
                         block_chunk = {
                             "id": completion_id,
                             "object": "chat.completion.chunk",
@@ -285,7 +302,7 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
                                 {
                                     "index": 0,
                                     "delta": {
-                                        "content": error_message
+                                        "content": delta_content
                                     },
                                     "finish_reason": "content_filter"
                                 }
@@ -367,6 +384,7 @@ async def stream_openai_completion_response(response: httpx.Response, guard_mana
     scan_buffer = ""
     block_on_error = config.get('block_on_guard_error', False)
     blocked = False
+    inline_guard = inline_guard_errors_enabled(config)
 
     try:
         async for raw_line in response.aiter_lines():
@@ -414,7 +432,10 @@ async def stream_openai_completion_response(response: httpx.Response, guard_mana
                     if not scan_result.get('allowed', True):
                         logger.warning("Streaming completion output blocked: %s", scan_result)
                         blocked = True
+                        failed_scanners = extract_failed_scanners(scan_result)
                         error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                        markdown_body = format_markdown_error("Content policy violation", error_message, failed_scanners)
+                        block_text = markdown_body if inline_guard else error_message
                         block_chunk = {
                             "id": completion_id,
                             "object": "text_completion",
@@ -423,7 +444,7 @@ async def stream_openai_completion_response(response: httpx.Response, guard_mana
                             "choices": [
                                 {
                                     "index": 0,
-                                    "text": error_message,
+                                    "text": block_text,
                                     "logprobs": None,
                                     "finish_reason": "content_filter"
                                 }
@@ -468,7 +489,10 @@ async def stream_openai_completion_response(response: httpx.Response, guard_mana
                     if not scan_result.get('allowed', True):
                         logger.warning("Final completion output blocked: %s", scan_result)
                         blocked = True
+                        failed_scanners = extract_failed_scanners(scan_result)
                         error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                        markdown_body = format_markdown_error("Content policy violation", error_message, failed_scanners)
+                        block_text = markdown_body if inline_guard else error_message
                         block_chunk = {
                             "id": completion_id,
                             "object": "text_completion",
@@ -477,7 +501,7 @@ async def stream_openai_completion_response(response: httpx.Response, guard_mana
                             "choices": [
                                 {
                                     "index": 0,
-                                    "text": error_message,
+                                    "text": block_text,
                                     "logprobs": None,
                                     "finish_reason": "content_filter"
                                 }

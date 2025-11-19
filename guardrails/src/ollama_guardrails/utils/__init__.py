@@ -47,6 +47,11 @@ from .device_config import (
     setup_transformers_cpu,
     get_recommended_config,
 )
+from .guard_responses import (
+    inline_guard_errors_enabled,
+    extract_failed_scanners,
+    format_markdown_error,
+)
 
 __all__ = [
     "extract_client_ip",
@@ -76,4 +81,7 @@ __all__ = [
     "is_gpu_mode",
     "setup_transformers_cpu",
     "get_recommended_config",
+    "inline_guard_errors_enabled",
+    "extract_failed_scanners",
+    "format_markdown_error",
 ]

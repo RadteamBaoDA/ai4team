@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, ORJSONResponse
 
 from .core.cache import GuardCache
@@ -189,6 +190,26 @@ def create_app(config_file: str | None = None) -> FastAPI:
     app.state.ip_whitelist = ip_whitelist
     app.state.concurrency_manager = concurrency_manager
     app.state.guard_cache = guard_cache
+
+    # Configure CORS
+    cors_allow_origins = config.get_list("cors_allow_origins") or ["*"]
+    cors_allow_origin_regex = config.get_str("cors_allow_origin_regex", "")
+    cors_allow_methods = config.get_list("cors_allow_methods") or ["*"]
+    cors_allow_headers = config.get_list("cors_allow_headers") or ["*"]
+    cors_expose_headers = config.get_list("cors_expose_headers") or []
+    cors_allow_credentials = config.get_bool("cors_allow_credentials", False)
+    cors_max_age = config.get_int("cors_max_age", 600)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_allow_origins,
+        allow_origin_regex=cors_allow_origin_regex or None,
+        allow_credentials=cors_allow_credentials,
+        allow_methods=cors_allow_methods,
+        allow_headers=cors_allow_headers,
+        expose_headers=cors_expose_headers,
+        max_age=cors_max_age,
+    )
 
     @app.middleware("http")
     async def check_ip_whitelist(request: Request, call_next: Any) -> Any:

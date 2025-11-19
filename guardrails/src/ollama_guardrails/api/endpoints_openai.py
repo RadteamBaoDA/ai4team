@@ -23,7 +23,10 @@ from ..utils import (
     extract_prompt_from_completion_payload, 
     extract_text_from_response,
     combine_messages_text,
-    build_ollama_options_from_openai_payload
+    build_ollama_options_from_openai_payload,
+    inline_guard_errors_enabled,
+    extract_failed_scanners,
+    format_markdown_error,
 )
 from ..utils.language import LanguageDetector
 
@@ -46,7 +49,128 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
     """
     
     # Import streaming handlers
-    from .streaming_handlers import stream_openai_chat_response, stream_openai_completion_response
+    from .streaming_handlers import (
+        stream_openai_chat_response,
+        stream_openai_completion_response,
+        format_sse_event,
+    )
+
+    def _zero_usage() -> Dict[str, int]:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    def _inline_chat_guard_response(model: str, markdown_message: str, is_stream: bool, guard_payload: Dict[str, Any]):
+        usage = guard_payload.get("usage") if guard_payload else None
+        if not usage:
+            usage = _zero_usage()
+
+        if is_stream:
+            async def _chat_error_stream():
+                completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+                created_ts = int(time.time())
+                role_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant"},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                yield format_sse_event(role_chunk)
+
+                content_chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": markdown_message},
+                            "finish_reason": "content_filter",
+                        }
+                    ],
+                    "guard": guard_payload,
+                }
+                yield format_sse_event(content_chunk)
+                yield b"data: [DONE]\n\n"
+
+            return StreamingResponse(_chat_error_stream(), media_type="text/event-stream")
+
+        completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+        created_ts = int(time.time())
+        result = {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created_ts,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": markdown_message},
+                    "finish_reason": "content_filter",
+                }
+            ],
+            "usage": usage,
+        }
+        if guard_payload:
+            result["guard"] = guard_payload
+        return JSONResponse(status_code=200, content=result)
+
+    def _inline_completion_guard_response(model: str, markdown_message: str, is_stream: bool, guard_payload: Dict[str, Any]):
+        usage = guard_payload.get("usage") if guard_payload else None
+        if not usage:
+            usage = _zero_usage()
+
+        if is_stream:
+            async def _completion_error_stream():
+                completion_id = f"cmpl-{uuid.uuid4().hex}"
+                created_ts = int(time.time())
+                chunk = {
+                    "id": completion_id,
+                    "object": "text_completion",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "text": markdown_message,
+                            "logprobs": None,
+                            "finish_reason": "content_filter",
+                        }
+                    ],
+                    "guard": guard_payload,
+                }
+                yield format_sse_event(chunk)
+                yield b"data: [DONE]\n\n"
+
+            return StreamingResponse(_completion_error_stream(), media_type="text/event-stream")
+
+        completion_id = f"cmpl-{uuid.uuid4().hex}"
+        created_ts = int(time.time())
+        result = {
+            "id": completion_id,
+            "object": "text_completion",
+            "created": created_ts,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "text": markdown_message,
+                    "logprobs": None,
+                    "finish_reason": "content_filter",
+                }
+            ],
+            "usage": usage,
+        }
+        if guard_payload:
+            result["guard"] = guard_payload
+        return JSONResponse(status_code=200, content=result)
+
     
     @router.post("/v1/chat/completions")
     async def openai_chat_completions(request: Request):
@@ -67,6 +191,9 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
         model = payload.get('model')
         if not isinstance(model, str) or not model.strip():
             raise HTTPException(status_code=400, detail={"error": "invalid_model", "message": "model is required."})
+
+        is_stream = bool(payload.get('stream', False))
+        inline_guard = inline_guard_errors_enabled(config)
 
         # Generate request ID
         request_id = f"oai-chat-{uuid.uuid4().hex[:8]}"
@@ -91,20 +218,21 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
                             pass
                 if not input_result.get('allowed', True):
                     logger.warning("OpenAI input blocked by LLM Guard: %s", input_result)
-                    
-                    # Extract failed scanners with details
-                    failed_scanners = []
-                    for scanner_name, info in input_result.get('scanners', {}).items():
-                        if not info.get('passed', True):
-                            failed_scanners.append({
-                                "scanner": scanner_name,
-                                "reason": info.get('reason', 'Content policy violation'),
-                                "score": info.get('score')
-                            })
-                    
-                    reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners])
+
+                    failed_scanners = extract_failed_scanners(input_result)
+                    reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners]) if failed_scanners else None
                     error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
-                    
+
+                    if inline_guard:
+                        markdown_message = format_markdown_error("Input blocked", error_message, failed_scanners)
+                        guard_payload = {
+                            "failed_scanners": failed_scanners,
+                            "type": "input_blocked",
+                            "language": detected_lang,
+                            "usage": _zero_usage(),
+                        }
+                        return _inline_chat_guard_response(model, markdown_message, is_stream, guard_payload)
+
                     raise HTTPException(
                         status_code=451,
                         detail=error_message,
@@ -188,8 +316,15 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
                     pass
                 raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
 
+            usage = _zero_usage()
             output_text = ""
             if isinstance(data, dict):
+                usage = {
+                    "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+                    "completion_tokens": int(data.get('eval_count', 0) or 0)
+                }
+                usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
+
                 message = data.get('message')
                 if isinstance(message, dict):
                     output_text = message.get('content', '')
@@ -217,17 +352,20 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
                     except Exception as e:
                         logger.debug(f"Error closing connection: {e}")
                     
-                    # Extract failed scanners with details
-                    failed_scanners = []
-                    for scanner_name, info in output_result.get('scanners', {}).items():
-                        if not info.get('passed', True):
-                            failed_scanners.append({
-                                "scanner": scanner_name,
-                                "reason": info.get('reason', 'Content policy violation'),
-                                "score": info.get('score')
-                            })
-                    
+                    failed_scanners = extract_failed_scanners(output_result)
                     error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+
+                    guard_payload = {
+                        "failed_scanners": failed_scanners,
+                        "type": "output_blocked",
+                        "language": detected_lang,
+                        "usage": usage,
+                    }
+
+                    if inline_guard:
+                        markdown_message = format_markdown_error("Response blocked", error_message, failed_scanners)
+                        return _inline_chat_guard_response(model, markdown_message, False, guard_payload)
+
                     raise HTTPException(
                         status_code=451,
                         detail=error_message,
@@ -248,11 +386,6 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
 
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created_ts = int(time.time())
-            usage = {
-                "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
-                "completion_tokens": int(data.get('eval_count', 0) or 0)
-            }
-            usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
 
             result = {
                 "id": completion_id,
@@ -313,25 +446,28 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
             raise HTTPException(status_code=400, detail={"error": "invalid_prompt", "message": "prompt must be provided."})
 
         detected_lang = LanguageDetector.detect_language(prompt_text)
+        is_stream = bool(payload.get('stream', False))
+        inline_guard = inline_guard_errors_enabled(config)
 
         if config.get('enable_input_guard', True) and prompt_text:
             input_result = await guard_manager.scan_input(prompt_text, block_on_error=config.get('block_on_guard_error', False))
             if not input_result.get('allowed', True):
                 logger.warning("OpenAI completion input blocked by LLM Guard: %s", input_result)
-                
-                # Extract failed scanners with details
-                failed_scanners = []
-                for scanner_name, info in input_result.get('scanners', {}).items():
-                    if not info.get('passed', True):
-                        failed_scanners.append({
-                            "scanner": scanner_name,
-                            "reason": info.get('reason', 'Content policy violation'),
-                            "score": info.get('score')
-                        })
-                
-                reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners])
+
+                failed_scanners = extract_failed_scanners(input_result)
+                reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners]) if failed_scanners else None
                 error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
-                
+
+                if inline_guard:
+                    markdown_message = format_markdown_error("Input blocked", error_message, failed_scanners)
+                    guard_payload = {
+                        "failed_scanners": failed_scanners,
+                        "type": "input_blocked",
+                        "language": detected_lang,
+                        "usage": _zero_usage(),
+                    }
+                    return _inline_completion_guard_response(model, markdown_message, is_stream, guard_payload)
+
                 raise HTTPException(
                     status_code=451,
                     detail=error_message,
@@ -358,7 +494,6 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
 
         ollama_url = config.get('ollama_url')
         url = f"{ollama_url.rstrip('/')}/api/generate"
-        is_stream = bool(payload.get('stream'))
 
         try:
             client = get_http_client()
@@ -413,6 +548,14 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
                 pass
             raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
 
+        usage = _zero_usage()
+        if isinstance(data, dict):
+            usage = {
+                "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+                "completion_tokens": int(data.get('eval_count', 0) or 0)
+            }
+            usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
+
         output_text = extract_text_from_response(data)
 
         if config.get('enable_output_guard', True) and output_text:
@@ -438,17 +581,20 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
                 except Exception as e:
                     logger.debug(f"Error closing connection: {e}")
                 
-                # Extract failed scanners with details
-                failed_scanners = []
-                for scanner_name, info in output_result.get('scanners', {}).items():
-                    if not info.get('passed', True):
-                        failed_scanners.append({
-                            "scanner": scanner_name,
-                            "reason": info.get('reason', 'Content policy violation'),
-                            "score": info.get('score')
-                        })
-                
+                failed_scanners = extract_failed_scanners(output_result)
                 error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+
+                guard_payload = {
+                    "failed_scanners": failed_scanners,
+                    "type": "output_blocked",
+                    "language": detected_lang,
+                    "usage": usage,
+                }
+
+                if inline_guard:
+                    markdown_message = format_markdown_error("Response blocked", error_message, failed_scanners)
+                    return _inline_completion_guard_response(model, markdown_message, False, guard_payload)
+
                 raise HTTPException(
                     status_code=451,
                     detail=error_message,
@@ -469,11 +615,6 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager, guard_ca
 
         completion_id = f"cmpl-{uuid.uuid4().hex}"
         created_ts = int(time.time())
-        usage = {
-            "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
-            "completion_tokens": int(data.get('eval_count', 0) or 0)
-        }
-        usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
 
         result = {
             "id": completion_id,

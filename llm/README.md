@@ -253,6 +253,31 @@ for chunk in response:
     print(chunk.choices[0].delta.content, end="")
 ```
 
+## 🆕 GPT-5.1 Codex Preview
+
+We now expose OpenAI's **GPT-5.1-Codex (Preview)** model alongside the Ollama backends. Every client hitting the LiteLLM proxy can opt into the preview model simply by setting `"model": "gpt-5.1-codex-preview"` on any OpenAI-compatible request.
+
+Key details:
+
+- Routed directly through OpenAI's API with the same guardrail stack (`llm-guard-input` + `llm-guard-output`).
+- Streaming and non-streaming Chat/Completion endpoints work out of the box.
+- `context_windows` is configured at `200k` tokens for this model, and rate limits default to **60 RPM** (tweak via `litellm_config.yaml`).
+- Ensure the proxy host has `OPENAI_API_KEY` (or `LITELLM_DEFAULT_OPENAI_API_KEY`) exported; LiteLLM forwards it automatically.
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+        "model": "gpt-5.1-codex-preview",
+        "messages": [{"role": "user", "content": "Summarize the new guard policies."}],
+        "stream": true
+      }'
+```
+
+All existing dashboards, logging, and guard policies automatically include GPT-5.1 Codex activity.
+
 ## 🚀 Deployment
 
 ### Quick Start

@@ -12,13 +12,20 @@ import json
 import logging
 import uuid
 import asyncio
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..middleware.http_client import forward_request, safe_json, get_http_client
-from ..utils import extract_model_from_payload, extract_text_from_payload, extract_text_from_response
+from ..utils import (
+    extract_model_from_payload,
+    extract_text_from_payload,
+    extract_text_from_response,
+    inline_guard_errors_enabled,
+    extract_failed_scanners,
+    format_markdown_error,
+)
 from ..utils.language import LanguageDetector
 
 logger = logging.getLogger(__name__)
@@ -42,6 +49,60 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
     # Import streaming handlers
     from .streaming_handlers import create_streaming_handlers
     stream_response_with_guard = create_streaming_handlers(config, guard_manager)
+
+    def _inline_generate_guard_response(
+        model_name: Optional[str],
+        markdown_message: str,
+        error_message: str,
+        is_stream: bool,
+        guard_payload: Dict[str, Any],
+    ):
+        payload = {
+            "model": model_name,
+            "response": markdown_message,
+            "done": True,
+            "error": {
+                "message": error_message,
+                "type": guard_payload.get("type"),
+                "language": guard_payload.get("language"),
+            },
+            "guard": guard_payload,
+        }
+
+        if is_stream:
+            async def _inline_stream():
+                yield json.dumps(payload) + "\n"
+
+            return StreamingResponse(_inline_stream(), media_type="application/x-ndjson")
+
+        return JSONResponse(status_code=200, content=payload)
+
+    def _inline_chat_guard_response(
+        model_name: Optional[str],
+        markdown_message: str,
+        error_message: str,
+        is_stream: bool,
+        guard_payload: Dict[str, Any],
+    ):
+        payload = {
+            "model": model_name,
+            "message": {"role": "assistant", "content": markdown_message},
+            "done": True,
+            "error": {
+                "message": error_message,
+                "type": guard_payload.get("type"),
+                "language": guard_payload.get("language"),
+            },
+            "guard": guard_payload,
+        }
+
+        if is_stream:
+            async def _inline_stream():
+                yield json.dumps(payload) + "\n"
+
+            return StreamingResponse(_inline_stream(), media_type="text/event-stream")
+
+        return JSONResponse(status_code=200, content=payload)
     
     @router.post("/api/generate")
     async def proxy_generate(request: Request, background_tasks: BackgroundTasks):
@@ -56,6 +117,8 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         model_name = extract_model_from_payload(payload)
         prompt = extract_text_from_payload(payload)
         detected_lang = LanguageDetector.detect_language(prompt)
+        inline_guard = inline_guard_errors_enabled(config)
+        is_stream = bool(payload.get('stream') if isinstance(payload, dict) else False)
         
         # Generate unique request ID
         request_id = f"gen-{uuid.uuid4().hex[:8]}"
@@ -78,21 +141,19 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                             pass
                 if not input_result.get('allowed', True):
                     logger.warning("Input blocked by LLM Guard: %s", input_result)
-                    
-                    # Extract failed scanners with details
-                    failed_scanners = []
-                    for scanner_name, info in input_result.get('scanners', {}).items():
-                        if not info.get('passed', True):
-                            failed_scanners.append({
-                                "scanner": scanner_name,
-                                "reason": info.get('reason', 'Content policy violation'),
-                                "score": info.get('score')
-                            })
-                    
-                    # Build user-friendly reason
-                    reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners])
+                    failed_scanners = extract_failed_scanners(input_result)
+                    reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners]) if failed_scanners else None
                     error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
-                    
+
+                    if inline_guard:
+                        markdown_message = format_markdown_error("Input blocked", error_message, failed_scanners)
+                        guard_payload = {
+                            "failed_scanners": failed_scanners,
+                            "type": "input_blocked",
+                            "language": detected_lang,
+                        }
+                        return _inline_generate_guard_response(model_name, markdown_message, error_message, is_stream, guard_payload)
+
                     raise HTTPException(
                         status_code=451,
                         detail=error_message,
@@ -106,7 +167,6 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
 
             # Forward to Ollama
             path = config.get('ollama_path', '/api/generate')
-            is_stream = bool(payload.get('stream') if isinstance(payload, dict) else False)
             resp, err = await forward_request(config, path, payload=payload, stream=is_stream)
             if err:
                 logger.error("Upstream error: %s", err)
@@ -164,17 +224,20 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                     except Exception as e:
                         logger.debug(f"Error closing connection: {e}")
                     
-                    # Extract failed scanners with details
-                    failed_scanners = []
-                    for scanner_name, info in output_result.get('scanners', {}).items():
-                        if not info.get('passed', True):
-                            failed_scanners.append({
-                                "scanner": scanner_name,
-                                "reason": info.get('reason', 'Content policy violation'),
-                                "score": info.get('score')
-                            })
-                    
+                    failed_scanners = extract_failed_scanners(output_result)
                     error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+
+                    guard_payload = {
+                        "failed_scanners": failed_scanners,
+                        "type": "output_blocked",
+                        "language": detected_lang,
+                        "scan": output_result,
+                    }
+
+                    if inline_guard:
+                        markdown_message = format_markdown_error("Response blocked", error_message, failed_scanners)
+                        return _inline_generate_guard_response(model_name, markdown_message, error_message, False, guard_payload)
+
                     raise HTTPException(
                         status_code=451,
                         detail=error_message,
@@ -238,6 +301,8 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         
         # Detect language from prompt
         detected_lang = LanguageDetector.detect_language(prompt)
+        inline_guard = inline_guard_errors_enabled(config)
+        is_stream = bool(payload.get('stream'))
         
         # Define processing coroutine
         async def process_chat_request():
@@ -258,29 +323,21 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                             await guard_cache.set_input_result(prompt, input_result)
                         except Exception:
                             pass
-                if not input_result['allowed']:
+                if not input_result.get('allowed', True):
                     logger.warning(f"Chat input blocked by LLM Guard: {input_result}")
-                    
-                    # Extract failed scanners with details
-                    failed_scanners = []
-                    for scanner_name, info in input_result.get('scanners', {}).items():
-                        if not info.get('passed', True):
-                            failed_scanners.append({
-                                "scanner": scanner_name,
-                                "reason": info.get('reason', 'Content policy violation'),
-                                "score": info.get('score')
-                            })
-                    
-                    # Build reason string
-                    reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners])
-                    
-                    # Get localized error message
-                    error_message = LanguageDetector.get_error_message(
-                        'prompt_blocked',
-                        detected_lang,
-                        reason
-                    )
-                    
+                    failed_scanners = extract_failed_scanners(input_result)
+                    reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners]) if failed_scanners else None
+                    error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
+
+                    if inline_guard:
+                        markdown_message = format_markdown_error("Input blocked", error_message, failed_scanners)
+                        guard_payload = {
+                            "failed_scanners": failed_scanners,
+                            "type": "input_blocked",
+                            "language": detected_lang,
+                        }
+                        return _inline_chat_guard_response(model_name, markdown_message, error_message, is_stream, guard_payload)
+
                     raise HTTPException(
                         status_code=451,
                         detail=error_message,
@@ -295,7 +352,6 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
             # Forward to Ollama chat endpoint
             ollama_url = config.get('ollama_url')
             url = f"{ollama_url.rstrip('/')}/api/chat"
-            is_stream = 'stream' in payload and payload['stream']
             
             try:
                 client = get_http_client()
@@ -329,9 +385,21 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                         
                         if output_text:
                             output_result = await guard_manager.scan_output(output_text, prompt=prompt)
-                            if not output_result['allowed']:
+                            if not output_result.get('allowed', True):
                                 logger.warning(f"Output blocked: {output_result}")
+                                failed_scanners = extract_failed_scanners(output_result)
                                 error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                                guard_payload = {
+                                    "failed_scanners": failed_scanners,
+                                    "type": "output_blocked",
+                                    "language": detected_lang,
+                                    "scan": output_result,
+                                }
+
+                                if inline_guard:
+                                    markdown_message = format_markdown_error("Response blocked", error_message, failed_scanners)
+                                    return _inline_chat_guard_response(model_name, markdown_message, error_message, False, guard_payload)
+
                                 raise HTTPException(
                                     status_code=451,
                                     detail={

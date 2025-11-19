@@ -132,6 +132,18 @@ guardrails:
       - "llm-guard-input"
       - "llm-guard-output"
 
+  # OpenAI GPT-5.1 Codex (Preview) - direct OpenAI access for all clients
+  - model_name: gpt-5.1-codex-preview
+    litellm_params:
+      model: gpt-5.1-codex-preview
+      api_base: https://api.openai.com/v1
+      timeout: 300
+      max_retries: 2
+      stream: true
+    guardrails:
+      - "llm-guard-input"
+      - "llm-guard-output"
+
 # Load balancing configuration
 load_balancing_config:
   # Strategy: can be "round_robin", "least_busy", "weighted"
@@ -162,6 +174,7 @@ router_settings:
     ollama/llama3.2: 8192
     ollama/mistral: 32000
     ollama/neural-chat: 4096
+    gpt-5.1-codex-preview: 200000
 
 # Proxy server settings
 proxy_server:
@@ -235,6 +248,7 @@ rate_limit:
     "ollama/llama3.2": 30  # requests per minute
     "ollama/mistral": 40
     "ollama/neural-chat": 50
+    "gpt-5.1-codex-preview": 60
 
 # Monitoring and alerting
 monitoring:

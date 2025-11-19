@@ -4,7 +4,9 @@ HTTP client management for Ollama Guard Proxy.
 Provides singleton HTTP client with connection pooling.
 """
 
+import json
 import logging
+import os
 from typing import Optional, Tuple, Any
 
 import httpx
@@ -13,6 +15,26 @@ logger = logging.getLogger(__name__)
 
 # HTTP connection pooling for upstream Ollama
 _HTTP_CLIENT: Optional[httpx.AsyncClient] = None
+_TRUST_ENV_DEFAULT = False
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).lower() in {"1", "true", "yes", "on"}
+
+
+def _summarize_payload(payload: Any, limit: int = 512) -> str:
+    """Return a trimmed, log-friendly representation of the payload."""
+    if payload is None:
+        return "null"
+    try:
+        serialized = json.dumps(payload)
+    except Exception:
+        serialized = str(payload)
+    serialized = serialized.replace("\n", " ")
+    return serialized if len(serialized) <= limit else serialized[:limit] + "(truncated)"
 
 
 def get_http_client(max_pool: int = 100) -> httpx.AsyncClient:
@@ -22,7 +44,9 @@ def get_http_client(max_pool: int = 100) -> httpx.AsyncClient:
         limits = httpx.Limits(max_connections=max_pool, max_keepalive_connections=max_pool)
         # Set a default timeout
         timeout = httpx.Timeout(300.0, connect=60.0)
-        _HTTP_CLIENT = httpx.AsyncClient(limits=limits, timeout=timeout)
+        trust_env = _env_bool("HTTPX_TRUST_ENV", _TRUST_ENV_DEFAULT)
+        _HTTP_CLIENT = httpx.AsyncClient(limits=limits, timeout=timeout, trust_env=trust_env)
+        logger.info("HTTP client initialized (trust_env=%s)", trust_env)
     return _HTTP_CLIENT
 
 
@@ -71,4 +95,15 @@ async def forward_request(config, path: str, payload: Any = None, stream: bool =
             resp = await client.post(full, json=payload, timeout=timeout)
         return resp, None
     except httpx.RequestError as e:
+        request = getattr(e, "request", None)
+        method = request.method if request else ("GET" if payload is None else "POST")
+        target_url = str(request.url) if request and request.url else full
+        logger.error(
+            "HTTPX request error [%s %s] (timeout=%ss): %s | payload=%s",
+            method,
+            target_url,
+            timeout,
+            repr(e),
+            _summarize_payload(payload),
+        )
         return None, str(e)
