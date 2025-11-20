@@ -38,15 +38,61 @@ def _summarize_payload(payload: Any, limit: int = 512) -> str:
 
 
 def get_http_client(max_pool: int = 100) -> httpx.AsyncClient:
-    """Get or create the singleton HTTP client with connection pooling."""
+    """
+    Get or create the singleton HTTP client with production-optimized connection pooling.
+    
+    Configuration:
+    - Connection pooling: max_pool connections
+    - Keep-alive connections: max_pool
+    - Timeout: 300s (read), 60s (connect)
+    - Trust env: Respects HTTP_PROXY, HTTPS_PROXY variables
+    - HTTP/2 support: Enabled if h2 package is available
+    """
     global _HTTP_CLIENT
     if _HTTP_CLIENT is None:
-        limits = httpx.Limits(max_connections=max_pool, max_keepalive_connections=max_pool)
-        # Set a default timeout
-        timeout = httpx.Timeout(300.0, connect=60.0)
+        # Production-optimized limits
+        limits = httpx.Limits(
+            max_connections=max_pool,
+            max_keepalive_connections=max_pool,
+            keepalive_expiry=30.0  # Close idle connections after 30s
+        )
+        
+        # Generous timeout for Ollama (large models can be slow)
+        timeout = httpx.Timeout(
+            300.0,           # Read timeout (for streaming responses)
+            connect=60.0,    # Connection timeout
+            write=60.0,      # Write timeout
+            pool=60.0        # Pool timeout
+        )
+        
+        # Trust environment proxy variables
         trust_env = _env_bool("HTTPX_TRUST_ENV", _TRUST_ENV_DEFAULT)
-        _HTTP_CLIENT = httpx.AsyncClient(limits=limits, timeout=timeout, trust_env=trust_env)
-        logger.info("HTTP client initialized (trust_env=%s)", trust_env)
+        
+        # Check if HTTP/2 is available (h2 package)
+        http2_enabled = True
+        try:
+            import h2  # noqa: F401
+        except ImportError:
+            http2_enabled = False
+            logger.info("HTTP/2 support not available (h2 package not installed). Using HTTP/1.1.")
+        
+        # Create client with optimizations
+        _HTTP_CLIENT = httpx.AsyncClient(
+            limits=limits,
+            timeout=timeout,
+            trust_env=trust_env,
+            http2=http2_enabled,     # Enable HTTP/2 only if h2 is available
+            follow_redirects=False,  # Let app handle redirects
+            verify=True,             # Verify SSL certificates
+        )
+        
+        http_version = "HTTP/2" if http2_enabled else "HTTP/1.1"
+        logger.info(
+            "HTTP client initialized (pool=%d, keep-alive=30s, %s, trust_env=%s)",
+            max_pool,
+            http_version,
+            trust_env
+        )
     return _HTTP_CLIENT
 
 
@@ -70,10 +116,17 @@ async def safe_json(response: httpx.Response) -> Tuple[Optional[dict], Optional[
 
 
 async def forward_request(config, path: str, payload: Any = None, stream: bool = False, timeout: int = 300):
-    """Forward a request to the Ollama backend.
+    """
+    Forward a request to the Ollama backend with reverse proxy support.
 
     Returns the httpx.Response and an optional error string.
     For streaming, returns the stream context manager that must be used with 'async with'.
+    
+    Features:
+    - Connection pooling and keep-alive
+    - HTTP/2 support for better performance
+    - Generous timeout for large model responses
+    - Proper error handling and logging
     
     Args:
         config: Configuration object

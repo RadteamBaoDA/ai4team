@@ -9,13 +9,20 @@ from __future__ import annotations
 import logging
 import os
 import time
+import multiprocessing
+import warnings
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, ORJSONResponse
+
+# Suppress the FutureWarning about TRANSFORMERS_CACHE being deprecated in transformers v5
+# This warning comes from llm-guard dependencies, not our code
+warnings.filterwarnings('ignore', category=FutureWarning, module='transformers.utils.hub')
 
 from .core.cache import GuardCache
 from .core.concurrency import ConcurrencyManager
@@ -24,6 +31,11 @@ from .guards.guard_manager import LLMGuardManager
 from .middleware.http_client import close_http_client, get_http_client
 from .middleware.ip_whitelist import IPWhitelist
 from .utils import extract_client_ip, force_cpu_mode
+
+# Set HF_HOME before any transformers imports to avoid TRANSFORMERS_CACHE deprecation warning
+# This must be done BEFORE any imports that use transformers
+if not os.environ.get('HF_HOME'):
+    os.environ['HF_HOME'] = os.environ.get('HF_HOME', './models/huggingface')
 
 # Initialize offline mode for tiktoken and Hugging Face BEFORE importing llm-guard
 # (Using early initialization before logger is available)
@@ -212,6 +224,14 @@ def create_app(config_file: str | None = None) -> FastAPI:
         max_age=cors_max_age,
     )
 
+    # TrustedHost middleware for reverse proxy support
+    # Allows proper client IP detection from X-Forwarded-For headers
+    trusted_hosts = config.get_list("trusted_hosts") or ["*"]
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=trusted_hosts + ["*"] if config.get("forwarded_allow_ips") == "*" else trusted_hosts
+    )
+
     @app.middleware("http")
     async def check_ip_whitelist(request: Request, call_next: Any) -> Any:
         """Middleware to check IP whitelist (nginx only)."""
@@ -253,6 +273,49 @@ def create_app(config_file: str | None = None) -> FastAPI:
             else:
                 logger.info("Response completed (%d ms)", duration_ms)
 
+    @app.middleware("http")
+    async def request_queue_status(request: Request, call_next: Any) -> Any:
+        """
+        Add request queue information to response headers.
+        When workers are busy, requests are queued by OS/Uvicorn.
+        """
+        response = await call_next(request)
+        
+        # Get current concurrency stats
+        try:
+            stats = await concurrency_manager.get_stats()
+            total_active = sum(
+                model_stats.get("active_requests", 0)
+                for model_stats in stats.get("models", {}).values()
+            )
+            total_queued = sum(
+                model_stats.get("queued_requests", 0)
+                for model_stats in stats.get("models", {}).values()
+            )
+            
+            response.headers["X-Queue-Status"] = "active" if total_queued > 0 else "idle"
+            response.headers["X-Active-Requests"] = str(total_active)
+            response.headers["X-Queued-Requests"] = str(total_queued)
+        except Exception as e:
+            logger.debug(f"Could not get queue stats: {e}")
+        
+        return response
+
+    @app.middleware("http")
+    async def handle_reverse_proxy_headers(request: Request, call_next: Any) -> Any:
+        """
+        Handle X-Forwarded-* headers for reverse proxy support.
+        Enables proper client IP detection when behind nginx, Apache, etc.
+        """
+        response = await call_next(request)
+        
+        # Add Via header for reverse proxy chain visibility
+        via = response.headers.get("Via", "")
+        app_name = "Ollama-Guardrails/1.0"
+        response.headers["Via"] = f"{via}, {app_name}" if via else f"1.1 {app_name}"
+        
+        return response
+
     # Create and register endpoint routers
     ollama_router = create_ollama_endpoints(
         config=config,
@@ -292,23 +355,101 @@ app = create_app()
 
 
 def run_server() -> None:
-    """Run the server with configuration from environment or config file."""
+    """Run the server with production-optimized Uvicorn configuration."""
     config_file = os.environ.get("CONFIG_FILE")
     config = Config(config_file)
     
     host = config.get("proxy_host", "0.0.0.0")
     port = config.get("proxy_port", 8080)
     
+    # Get worker count from config (default to CPU core count)
+    workers_config = config.get("workers", "auto")
+    if workers_config == "auto":
+        workers = multiprocessing.cpu_count()
+    else:
+        try:
+            workers = int(workers_config)
+        except (ValueError, TypeError):
+            workers = multiprocessing.cpu_count()
+    
+    # Get request queue configuration
+    queue_size = config.get_int("queue_size", 1024)
+    queue_timeout = config.get_int("queue_timeout", 30)
+    
+    # Production Uvicorn settings
+    access_log = config.get_bool("access_log", False)
+    timeout_keep_alive = config.get_int("timeout_keep_alive", 65)
+    limit_max_requests = config.get_int("limit_max_requests", 1000)
+    
     logger.info(f"Starting Ollama Guard Proxy on {host}:{port}")
     logger.info(f"Forwarding to Ollama at {config.get('ollama_url')}")
+    logger.info(f"Worker threads: {workers} (one request per thread, based on CPU cores)")
+    logger.info(f"Request queue: {queue_size} max requests (timeout: {queue_timeout}s)")
+    logger.info("=" * 60)
+    logger.info("Production Configuration:")
+    logger.info(f"  - Access log: {'enabled' if access_log else 'disabled'}")
+    logger.info(f"  - Keep-alive timeout: {timeout_keep_alive}s")
+    logger.info(f"  - Max requests per worker: {limit_max_requests}")
+    logger.info(f"  - Reverse proxy mode: enabled (X-Forwarded-* headers supported)")
     logger.info("=" * 60)
     logger.info("Available Endpoints:")
     logger.info("  Ollama API: /api/* (12 endpoints)")
     logger.info("  OpenAI API: /v1/* (4 endpoints)")
     logger.info("  Admin API: /health, /config, /stats, /admin/*, /queue/*")
     logger.info("=" * 60)
+    logger.info("When workers are busy: requests will queue up to %d slots", queue_size)
+    logger.info("=" * 60)
     
-    uvicorn.run(app, host=host, port=port)
+    # Production-optimized Uvicorn configuration
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        workers=workers,
+        backlog=queue_size,                    # TCP accept queue size
+        timeout_keep_alive=timeout_keep_alive,  # Connection keep-alive timeout
+        limit_max_requests=limit_max_requests,  # Restart worker after N requests (memory leak prevention)
+        limit_concurrency=None,                 # Let OS handle concurrency
+        access_log=access_log,                  # Disable for high-traffic environments
+        interface="asgi3",                      # Use ASGI3 interface
+        loop="auto",                            # Auto-detect best event loop
+        http="auto",                            # Auto-detect HTTP server (httptools > h11)
+        log_config={                            # Custom log config
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                },
+                "access": {
+                    "format": '%(asctime)s - %(client_addr)s - "%(request_line)s" %(status_code)s %(message)s',
+                },
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stderr",
+                },
+                "access": {
+                    "formatter": "access",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stdout",
+                },
+            },
+            "loggers": {
+                "uvicorn": {
+                    "handlers": ["default"],
+                    "level": "INFO",
+                },
+                "uvicorn.access": {
+                    "handlers": ["access"],
+                    "level": "INFO" if access_log else "CRITICAL",
+                    "propagate": False,
+                },
+            },
+        },
+    )
 
 
 if __name__ == "__main__":

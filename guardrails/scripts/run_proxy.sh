@@ -86,6 +86,7 @@ export_variables() {
     export NGINX_WHITELIST="${NGINX_WHITELIST:-}"
     export ENABLE_INPUT_GUARD="${ENABLE_INPUT_GUARD:-true}"
     export ENABLE_OUTPUT_GUARD="${ENABLE_OUTPUT_GUARD:-true}"
+    export INLINE_GUARD_ERRORS="${INLINE_GUARD_ERRORS:-true}"
     export ENABLE_IP_FILTER="${ENABLE_IP_FILTER:-}"
     export IP_WHITELIST="${IP_WHITELIST:-}"
     export IP_BLACKLIST="${IP_BLACKLIST:-}"
@@ -415,8 +416,10 @@ Environment Variables:
   NGINX_WHITELIST            Comma-separated IPs/CIDR for Nginx-only access
                              (e.g., "127.0.0.1,192.168.1.0/24")
                              Empty = allow all, for local dev only
-  ENABLE_INPUT_GUARD         true/false
-  ENABLE_OUTPUT_GUARD        true/false
+  ENABLE_INPUT_GUARD         true/false - Enable input scanning
+  ENABLE_OUTPUT_GUARD        true/false - Enable output scanning
+  INLINE_GUARD_ERRORS        true/false - Return guard errors inline in response
+                             (default: true)
   ENABLE_IP_FILTER           true/false
   IP_WHITELIST               Comma-separated IPs
   IP_BLACKLIST               Comma-separated IPs
@@ -538,7 +541,8 @@ run_interactive() {
   echo ""
 
   # Run Uvicorn with configuration
-  run_server}
+  run_server
+}
 
 # Main command dispatch
 case "$COMMAND" in

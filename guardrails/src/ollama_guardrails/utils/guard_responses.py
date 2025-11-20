@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import logging
 from typing import Any, Dict, List, Sequence
+
+logger = logging.getLogger(__name__)
 
 _BOOL_TRUE = {"1", "true", "yes", "on", "y", "t"}
 
@@ -19,8 +23,22 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
-def inline_guard_errors_enabled(config: Any, default: bool = False) -> bool:
-    """Return True if inline guard error responses should be used."""
+def inline_guard_errors_enabled(config: Any, default: bool = True) -> bool:
+    """Return True if inline guard error responses should be used.
+    
+    Checks in order:
+    1. INLINE_GUARD_ERRORS environment variable
+    2. config.get('inline_guard_errors') or config['inline_guard_errors']
+    3. default parameter (True)
+    """
+    # First check environment variable
+    env_value = os.environ.get('INLINE_GUARD_ERRORS')
+    if env_value is not None:
+        result = _coerce_bool(env_value, default)
+        logger.debug(f"inline_guard_errors_enabled: INLINE_GUARD_ERRORS={env_value} -> {result}")
+        return result
+    
+    # Then check config
     candidate = default
     try:
         if hasattr(config, "get"):
@@ -29,13 +47,21 @@ def inline_guard_errors_enabled(config: Any, default: bool = False) -> bool:
             candidate = config["inline_guard_errors"]
     except Exception:
         candidate = default
-    return _coerce_bool(candidate, default)
+    
+    result = _coerce_bool(candidate, default)
+    logger.debug(f"inline_guard_errors_enabled: config value={candidate} -> {result}")
+    return result
 
 
 def extract_failed_scanners(scan_result: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract normalized scanner failure details from scan results."""
+    if not isinstance(scan_result, dict):
+        logger.debug("extract_failed_scanners: unexpected scan_result type %s", type(scan_result).__name__)
+        return []
+
     failed: List[Dict[str, Any]] = []
-    scanners: Dict[str, Any] = (scan_result or {}).get("scanners", {})
+    scanners_obj = scan_result.get("scanners", {})
+    scanners: Dict[str, Any] = scanners_obj if isinstance(scanners_obj, dict) else {}
     for scanner_name, info in scanners.items():
         if info and not info.get("passed", True):
             failed.append(

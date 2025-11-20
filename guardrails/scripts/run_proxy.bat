@@ -156,8 +156,9 @@ if not exist "%CONFIG_FILE%" (
 REM Set environment variables
 if not defined OLLAMA_URL set "OLLAMA_URL=http://127.0.0.1:11434"
 if not defined NGINX_WHITELIST set "NGINX_WHITELIST="
-if not defined ENABLE_INPUT_GUARD set "ENABLE_INPUT_GUARD="
-if not defined ENABLE_OUTPUT_GUARD set "ENABLE_OUTPUT_GUARD="
+if not defined ENABLE_INPUT_GUARD set "ENABLE_INPUT_GUARD=true"
+if not defined ENABLE_OUTPUT_GUARD set "ENABLE_OUTPUT_GUARD=true"
+if not defined INLINE_GUARD_ERRORS set "INLINE_GUARD_ERRORS=true"
 if not defined ENABLE_IP_FILTER set "ENABLE_IP_FILTER="
 if not defined IP_WHITELIST set "IP_WHITELIST="
 if not defined IP_BLACKLIST set "IP_BLACKLIST="
@@ -240,6 +241,11 @@ if "%ENABLE_OUTPUT_GUARD%"=="" (
 ) else (
   echo   ENABLE_OUTPUT_GUARD:     %ENABLE_OUTPUT_GUARD%
 )
+if "%INLINE_GUARD_ERRORS%"=="" (
+  echo   INLINE_GUARD_ERRORS:     not set
+) else (
+  echo   INLINE_GUARD_ERRORS:     %INLINE_GUARD_ERRORS%
+)
 if "%ENABLE_IP_FILTER%"=="" (
   echo   ENABLE_IP_FILTER:        not set
 ) else (
@@ -312,8 +318,9 @@ echo.
 echo Environment Variables:
 echo   OLLAMA_URL               Ollama backend URL
 echo   NGINX_WHITELIST          Comma-separated IPs/CIDR for Nginx access
-echo   ENABLE_INPUT_GUARD       true/false
-echo   ENABLE_OUTPUT_GUARD      true/false
+echo   ENABLE_INPUT_GUARD       true/false - Enable input scanning
+echo   ENABLE_OUTPUT_GUARD      true/false - Enable output scanning
+echo   INLINE_GUARD_ERRORS      true/false - Return guard errors inline in response
 echo   ENABLE_IP_FILTER         true/false
 echo   IP_WHITELIST             Comma-separated IPs
 echo   IP_BLACKLIST             Comma-separated IPs

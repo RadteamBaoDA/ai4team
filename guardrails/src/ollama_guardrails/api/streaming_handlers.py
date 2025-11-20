@@ -7,10 +7,13 @@ Contains functions for handling streaming responses with output guard scanning:
 - stream_openai_completion_response: OpenAI text completions format
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 import httpx
@@ -24,6 +27,41 @@ from ..utils import (
 
 logger = logging.getLogger(__name__)
 min_output_length = 50
+
+def _now_ts() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_guard_block_chunk(model_name: str | None,
+                             message_content: str,
+                             detected_lang: str,
+                             guard_payload: Dict[str, Any]) -> Dict[str, Any]:
+    # Ensure markdown content has spacing before and after for clean rendering
+    if message_content:
+        if not message_content.endswith("\n"):
+            message_content = message_content + "\n"
+        if not message_content.startswith("\n\n\n"):
+            # Prepend three blank lines to visually separate error messages
+            message_content = "\n\n\n" + message_content
+
+    return {
+        "model": model_name,
+        "created_at": _now_ts(),
+        "message": {
+            "role": "assistant",
+            "content": message_content,
+        },
+        "done": True,
+        "done_reason": "guard_blocked",
+        "guard": guard_payload,
+        "error": {
+            "type": "content_policy_violation",
+            "message": guard_payload.get("message"),
+            "language": detected_lang,
+            "failed_scanners": guard_payload.get("failed_scanners", []),
+        },
+    }
+
 
 async def stream_response_with_guard(response: httpx.Response, guard_manager, config, detected_lang: str = 'en'):
     """Stream response with output scanning.
@@ -39,55 +77,75 @@ async def stream_response_with_guard(response: httpx.Response, guard_manager, co
     """
     accumulated_text = ""
     blocked = False
+    last_model = None
+    
+    # Ensure response is an httpx.Response object
+    if not isinstance(response, httpx.Response):
+        logger.error(f"Invalid response type: {type(response)}. Expected httpx.Response")
+        raise TypeError(f"Expected httpx.Response, got {type(response).__name__}")
     
     inline_guard = inline_guard_errors_enabled(config)
 
     try:
         async for line in response.aiter_lines():
-            if not line:
+            if not line or not isinstance(line, str):
+                if line:
+                    logger.debug(f"Skipping non-string line: {type(line)}")
                 continue
             
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
+                logger.debug(f"Skipping non-JSON line: {line[:100]}")
                 yield line + '\n'
                 continue
             
+            # Ensure data is a dictionary
+            if not isinstance(data, dict):
+                logger.debug(f"Skipping non-dict JSON: {type(data)}")
+                yield line + '\n'
+                continue
+            
+            # Track model if present
+            if isinstance(data, dict) and data.get('model'):
+                last_model = data.get('model')
+
             # Accumulate text from streaming responses
             # Handle /api/generate format: {"response": "text"}
             if 'response' in data:
-                accumulated_text += data['response']
+                response_text = data.get('response', '')
+                if isinstance(response_text, str):
+                    accumulated_text += response_text
+                else:
+                    logger.debug(f"Non-string response field: {type(response_text)}")
             # Handle /api/chat format: {"message": {"content": "text"}}
-            elif 'message' in data and isinstance(data['message'], dict):
-                content = data['message'].get('content', '')
-                if content:
-                    accumulated_text += content
+            elif 'message' in data:
+                message = data.get('message')
+                if isinstance(message, dict):
+                    content = message.get('content', '')
+                    if isinstance(content, str):
+                        accumulated_text += content
+                    else:
+                        logger.debug(f"Non-string message.content: {type(content)}")
             
             # Scan accumulated text periodically (every min_output_length chars)
             if len(accumulated_text) > min_output_length and config.get('enable_output_guard', True):
                 output_result = await guard_manager.scan_output(accumulated_text)
-                if not output_result['allowed']:
+                if not output_result.get('allowed', True):
                     logger.warning(f"Streaming output blocked by LLM Guard: {output_result}")
                     blocked = True
                     failed_scanners = extract_failed_scanners(output_result)
-                    
-                    # Get localized error message
                     error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
-                    markdown_body = None
-                    if inline_guard:
-                        markdown_body = format_markdown_error("Content policy violation", error_message, failed_scanners)
-                    
-                    # Send error as last chunk
-                    error_chunk = {
-                        "error": "content_policy_violation",
-                        "type": "output_blocked",
-                        "message": error_message,
-                        "language": detected_lang,
+                    guard_payload = {
                         "failed_scanners": failed_scanners,
-                        "markdown": markdown_body,
-                        "done": True
+                        "type": "output_blocked",
+                        "language": detected_lang,
+                        "scan": output_result,
+                        "message": error_message,
                     }
-                    yield (json.dumps(error_chunk) + '\n')
+                    message_content = format_markdown_error("Response blocked", error_message, failed_scanners) if inline_guard else error_message
+                    block_chunk = _build_guard_block_chunk(last_model, message_content, detected_lang, guard_payload)
+                    yield (json.dumps(block_chunk) + '\n')
                     
                     # Immediately close connection to stop Ollama generation
                     await response.aclose()
@@ -100,14 +158,33 @@ async def stream_response_with_guard(response: httpx.Response, guard_manager, co
         # Final scan of any remaining text (only if not already blocked)
         if not blocked and accumulated_text and config.get('enable_output_guard', True):
             output_result = await guard_manager.scan_output(accumulated_text)
-            if not output_result['allowed']:
+            if not output_result.get('allowed', True):
                 logger.warning(f"Final streaming output blocked: {output_result}")
                 blocked = True
+                failed_scanners = extract_failed_scanners(output_result)
+                error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+                guard_payload = {
+                    "failed_scanners": failed_scanners,
+                    "type": "output_blocked",
+                    "language": detected_lang,
+                    "scan": output_result,
+                    "message": error_message,
+                }
+                message_content = format_markdown_error("Response blocked", error_message, failed_scanners) if inline_guard else error_message
+                block_chunk = _build_guard_block_chunk(last_model, message_content, detected_lang, guard_payload)
+                yield (json.dumps(block_chunk) + '\n')
     
     except Exception as e:
-        logger.error(f"Error during streaming: {e}")
+        logger.error(f"Error during streaming: {e}", exc_info=True)
         error_message = LanguageDetector.get_error_message('server_error', detected_lang)
-        yield (json.dumps({"error": str(e), "message": error_message}) + '\n')
+        guard_payload = {
+            "failed_scanners": [],
+            "type": "server_error",
+            "language": detected_lang,
+            "message": error_message,
+        }
+        fallback_chunk = _build_guard_block_chunk(last_model, error_message, detected_lang, guard_payload)
+        yield (json.dumps(fallback_chunk) + '\n')
     finally:
         # Ensure connection is always closed
         if not blocked:  # Only close if not already closed in the block above
@@ -168,7 +245,7 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
                             "finish_reason": "error"
                         }
                     ],
-                    "error": data['error']
+                    "error": data.get('error')
                 }
                 yield format_sse_event(error_chunk)
                 yield b"data: [DONE]\n\n"
@@ -178,8 +255,19 @@ async def stream_openai_chat_response(response: httpx.Response, guard_manager, c
                 logger.info("Connection closed after upstream error")
                 return
 
-            message = data.get('message', {}) if isinstance(data, dict) else {}
-            delta_text = message.get('content', '') if isinstance(message, dict) else ''
+            if not isinstance(data, dict):
+                logger.debug(f"Skipping non-dict response in OpenAI chat: {type(data)}")
+                continue
+            
+            message = data.get('message', {})
+            if not isinstance(message, dict):
+                logger.debug(f"Invalid message type in OpenAI chat: {type(message)}")
+                continue
+            
+            delta_text = message.get('content', '')
+            if not isinstance(delta_text, str):
+                logger.debug(f"Invalid content type in OpenAI chat: {type(delta_text)}")
+                delta_text = str(delta_text) if delta_text else ''
 
             if delta_text:
                 if not sent_role_chunk:

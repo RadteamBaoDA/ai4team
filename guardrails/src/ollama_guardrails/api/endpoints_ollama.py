@@ -495,7 +495,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         return StreamingResponse(stream_bytes(), media_type="application/x-ndjson")
 
     @router.get("/api/tags")
-    async def proxy_tags():
+    async def proxy_tags(request: Request):
         """Proxy endpoint for Ollama list models."""
         resp, err = await forward_request(config, '/api/tags', payload=None, stream=False, timeout=10)
         if err:
@@ -574,8 +574,8 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         return JSONResponse(status_code=200, content=data)
 
     @router.get("/api/ps")
-    async def proxy_ps():
-        """Proxy endpoint for Ollama list running models."""
+    async def proxy_ps(request: Request):
+        """Proxy endpoint for Ollama running models (list running processes)."""
         resp, err = await forward_request(config, '/api/ps', payload=None, stream=False, timeout=10)
         if err:
             raise HTTPException(status_code=502, detail={"error": "upstream_error", "details": err})
@@ -587,7 +587,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         return JSONResponse(status_code=200, content=data)
 
     @router.get("/api/version")
-    async def proxy_version():
+    async def proxy_version(request: Request):
         """Proxy endpoint for Ollama version."""
         resp, err = await forward_request(config, '/api/version', payload=None, stream=False, timeout=10)
         if err:

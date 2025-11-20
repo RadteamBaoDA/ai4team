@@ -5,9 +5,46 @@
 ollama_url: http://192.168.1.2:11434
 ollama_path: /api/generate
 
+# Reverse Proxy Configuration
+# Enable forwarded headers support (X-Forwarded-For, X-Forwarded-Proto, etc.)
+# Set to true when running behind nginx, Apache, or other reverse proxies
+forwarded_allow_ips: "*"
+
+# Proxy timeout settings (seconds)
+# Increase these for large models or slow networks
+connection_timeout: 60
+read_timeout: 300
+write_timeout: 60
+
 # Proxy Server Configuration
 proxy_host: 0.0.0.0
 proxy_port: 8888
+
+# Uvicorn Server Configuration (Production Optimized)
+# Server access log - set to false for high-traffic environments
+access_log: true
+
+# Request timeout in seconds (for long-running requests like streaming)
+timeout_keep_alive: 65
+
+# Max header size in bytes (for large headers from Ollama)
+limit_max_requests: 1000
+
+# Number of connections to keep alive in the connection pool
+pool_connections: 100
+pool_maxsize: 100
+
+# Worker threads configuration
+# Number of worker threads. Set to 'auto' to use number of CPU cores
+# Each worker handles one request at a time (one request per thread)
+workers: "auto"
+
+# Request queue configuration
+# When all workers are busy, incoming requests are queued
+# queue_size: Maximum number of requests waiting in queue (backlog)
+# queue_timeout: Time in seconds to wait for queue slot before rejecting
+queue_size: 1024
+queue_timeout: 30
 
 # IP Access Control
 # Set enable_ip_filter to true to enforce IP-based access control
