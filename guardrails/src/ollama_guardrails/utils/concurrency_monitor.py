@@ -14,20 +14,18 @@ Features:
 """
 
 import os
-import sys
 import time
 import logging
 import threading
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 from collections import defaultdict
-from datetime import datetime
-from pathlib import Path
 
 try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
+    import psutil  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    psutil = None
+
+PSUTIL_AVAILABLE = psutil is not None
 
 logger = logging.getLogger(__name__)
 
@@ -157,11 +155,10 @@ class ConcurrencyMonitor:
     def _monitor_loop(self) -> None:
         """Internal monitoring loop."""
         process = None
-        if PSUTIL_AVAILABLE:
+        if PSUTIL_AVAILABLE and psutil is not None:
             try:
-                import psutil
                 process = psutil.Process(os.getpid())
-            except Exception as e:
+            except Exception as e:  # pragma: no cover - diagnostics only
                 logger.warning(f"Could not access process metrics: {e}")
                 process = None
             
@@ -274,7 +271,7 @@ def track_task(endpoint: str):
                 result = await func(*args, **kwargs)
                 monitor.decrement_task(endpoint, success=True)
                 return result
-            except Exception as e:
+            except Exception:
                 monitor.decrement_task(endpoint, success=False)
                 raise
         
@@ -285,7 +282,7 @@ def track_task(endpoint: str):
                 result = func(*args, **kwargs)
                 monitor.decrement_task(endpoint, success=True)
                 return result
-            except Exception as e:
+            except Exception:
                 monitor.decrement_task(endpoint, success=False)
                 raise
         

@@ -1,13 +1,10 @@
-"""
-HTTP client management for Ollama Guard Proxy.
+"""HTTP client management for Ollama Guard Proxy with tuning helpers."""
 
-Provides singleton HTTP client with connection pooling.
-"""
-
+import importlib
 import json
 import logging
 import os
-from typing import Optional, Tuple, Any
+from typing import Any, AsyncIterator, Dict, Optional, Tuple
 
 import httpx
 
@@ -16,6 +13,36 @@ logger = logging.getLogger(__name__)
 # HTTP connection pooling for upstream Ollama
 _HTTP_CLIENT: Optional[httpx.AsyncClient] = None
 _TRUST_ENV_DEFAULT = False
+
+_DEFAULT_MAX_CONNECTIONS = 200
+_DEFAULT_KEEPALIVE_EXPIRY = 45.0
+_DEFAULT_READ_TIMEOUT = 1_200.0
+_DEFAULT_WRITE_TIMEOUT = 120.0
+_DEFAULT_CONNECT_TIMEOUT = 60.0
+_DEFAULT_POOL_TIMEOUT = 60.0
+_DEFAULT_RETRIES = 2
+_STREAM_THRESHOLD = int(os.environ.get("OLLAMA_HTTP_STREAM_THRESHOLD", 512 * 1024))
+_JSON_CHUNK_SIZE = max(64 * 1024, int(os.environ.get("OLLAMA_HTTP_JSON_CHUNK_SIZE", 256 * 1024)))
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -37,6 +64,70 @@ def _summarize_payload(payload: Any, limit: int = 512) -> str:
     return serialized if len(serialized) <= limit else serialized[:limit] + "(truncated)"
 
 
+def _estimate_payload_size(obj: Any, depth: int = 0) -> int:
+    if depth > 8 or obj is None:
+        return 0
+    if isinstance(obj, (bytes, bytearray)):
+        return len(obj)
+    if isinstance(obj, str):
+        return len(obj.encode("utf-8"))
+    if isinstance(obj, (int, float)):
+        return len(str(obj))
+    if isinstance(obj, bool):
+        return 4
+    if isinstance(obj, dict):
+        total = 2
+        for key, value in obj.items():
+            total += _estimate_payload_size(key, depth + 1)
+            total += _estimate_payload_size(value, depth + 1)
+        return total
+    if isinstance(obj, (list, tuple, set)):
+        total = 2
+        for item in obj:
+            total += _estimate_payload_size(item, depth + 1)
+        return total
+    return len(str(obj))
+
+
+def _json_stream(payload: Any, chunk_size: int) -> AsyncIterator[bytes]:
+    async def _generator() -> AsyncIterator[bytes]:
+        encoder = json.JSONEncoder(separators=(",", ":"), ensure_ascii=False)
+        buffer: list[bytes] = []
+        size = 0
+        for piece in encoder.iterencode(payload):
+            data = piece.encode("utf-8")
+            buffer.append(data)
+            size += len(data)
+            if size >= chunk_size:
+                yield b"".join(buffer)
+                buffer = []
+                size = 0
+        if buffer:
+            yield b"".join(buffer)
+
+    return _generator()
+
+
+def _prepare_payload(payload: Any) -> Dict[str, Any]:
+    headers = {"Accept": "application/json"}
+    if payload is None:
+        return {"headers": headers, "json": None, "content": None}
+    headers["Content-Type"] = "application/json"
+    try:
+        estimated = _estimate_payload_size(payload)
+    except Exception:
+        estimated = 0
+
+    if estimated >= _STREAM_THRESHOLD:
+        return {
+            "headers": headers,
+            "json": None,
+            "content": _json_stream(payload, _JSON_CHUNK_SIZE),
+        }
+
+    return {"headers": headers, "json": payload, "content": None}
+
+
 def get_http_client(max_pool: int = 100) -> httpx.AsyncClient:
     """
     Get or create the singleton HTTP client with production-optimized connection pooling.
@@ -50,48 +141,58 @@ def get_http_client(max_pool: int = 100) -> httpx.AsyncClient:
     """
     global _HTTP_CLIENT
     if _HTTP_CLIENT is None:
-        # Production-optimized limits
+        max_connections = _env_int("OLLAMA_HTTP_MAX_CONNECTIONS", max_pool or _DEFAULT_MAX_CONNECTIONS)
+        max_keepalive = _env_int("OLLAMA_HTTP_MAX_KEEPALIVE", max_connections)
+        keepalive_expiry = _env_float("OLLAMA_HTTP_KEEPALIVE_EXPIRY", _DEFAULT_KEEPALIVE_EXPIRY)
+
         limits = httpx.Limits(
-            max_connections=max_pool,
-            max_keepalive_connections=max_pool,
-            keepalive_expiry=30.0  # Close idle connections after 30s
+            max_connections=max_connections,
+            max_keepalive_connections=max_keepalive,
+            keepalive_expiry=keepalive_expiry,
         )
-        
-        # Generous timeout for Ollama (large models can be slow)
+
+        read_timeout = _env_float("OLLAMA_HTTP_READ_TIMEOUT", _DEFAULT_READ_TIMEOUT)
+        connect_timeout = _env_float("OLLAMA_HTTP_CONNECT_TIMEOUT", _DEFAULT_CONNECT_TIMEOUT)
+        write_timeout = _env_float("OLLAMA_HTTP_WRITE_TIMEOUT", _DEFAULT_WRITE_TIMEOUT)
+        pool_timeout = _env_float("OLLAMA_HTTP_POOL_TIMEOUT", _DEFAULT_POOL_TIMEOUT)
+
         timeout = httpx.Timeout(
-            300.0,           # Read timeout (for streaming responses)
-            connect=60.0,    # Connection timeout
-            write=60.0,      # Write timeout
-            pool=60.0        # Pool timeout
+            read=read_timeout,
+            connect=connect_timeout,
+            write=write_timeout,
+            pool=pool_timeout,
         )
         
         # Trust environment proxy variables
         trust_env = _env_bool("HTTPX_TRUST_ENV", _TRUST_ENV_DEFAULT)
         
-        # Check if HTTP/2 is available (h2 package)
         http2_enabled = True
-        try:
-            import h2  # noqa: F401
+        try:  # pragma: no cover - best effort capability check
+            importlib.import_module("h2")
         except ImportError:
             http2_enabled = False
             logger.info("HTTP/2 support not available (h2 package not installed). Using HTTP/1.1.")
         
-        # Create client with optimizations
+        retries = max(0, _env_int("OLLAMA_HTTP_RETRIES", _DEFAULT_RETRIES))
+        transport = httpx.AsyncHTTPTransport(retries=retries, http2=http2_enabled)
+
         _HTTP_CLIENT = httpx.AsyncClient(
             limits=limits,
             timeout=timeout,
             trust_env=trust_env,
-            http2=http2_enabled,     # Enable HTTP/2 only if h2 is available
-            follow_redirects=False,  # Let app handle redirects
-            verify=True,             # Verify SSL certificates
+            transport=transport,
+            follow_redirects=False,
+            verify=True,
         )
         
         http_version = "HTTP/2" if http2_enabled else "HTTP/1.1"
         logger.info(
-            "HTTP client initialized (pool=%d, keep-alive=30s, %s, trust_env=%s)",
-            max_pool,
+            "HTTP client initialized (pool=%d, keep-alive=%ss, %s, retries=%d, trust_env=%s)",
+            max_connections,
+            keepalive_expiry,
             http_version,
-            trust_env
+            retries,
+            trust_env,
         )
     return _HTTP_CLIENT
 
@@ -137,15 +238,26 @@ async def forward_request(config, path: str, payload: Any = None, stream: bool =
     """
     ollama_url = config.get('ollama_url')
     full = f"{ollama_url.rstrip('/')}{path}"
+    payload_plan = _prepare_payload(payload)
+    headers = payload_plan["headers"]
+
     try:
         client = get_http_client()
         if payload is None:
-            resp = await client.get(full, timeout=timeout)
-        else:
-            if stream:
-                # For streaming, return the context manager itself
-                return client.stream("POST", full, json=payload, timeout=timeout), None
-            resp = await client.post(full, json=payload, timeout=timeout)
+            resp = await client.get(full, headers=headers, timeout=timeout)
+            return resp, None
+
+        request_kwargs = {
+            "headers": headers,
+            "timeout": timeout,
+            "json": payload_plan["json"],
+            "content": payload_plan["content"],
+        }
+
+        if stream:
+            return client.stream("POST", full, **request_kwargs), None
+
+        resp = await client.post(full, **request_kwargs)
         return resp, None
     except httpx.RequestError as e:
         request = getattr(e, "request", None)

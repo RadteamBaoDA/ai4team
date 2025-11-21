@@ -4,40 +4,6 @@ version: '3.8'
 # Includes performance tuning and resource limits suitable for M1/M2/M3 processors
 
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: ollama-redis-macos
-    hostname: redis
-    platform: linux/arm64
-    ports:
-      - "127.0.0.1:6379:6379"  # Only accessible from localhost
-    command: >
-      redis-server
-      --appendonly yes
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --save 60 1000
-      --loglevel warning
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    networks:
-      - ollama_network
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-
   ollama:
     image: ollama/ollama:latest
     container_name: ollama-macos
@@ -108,19 +74,6 @@ services:
       - IP_WHITELIST=
       - IP_BLACKLIST=
       
-      # Cache configuration
-      - CACHE_ENABLED=true
-      - CACHE_BACKEND=redis
-      - CACHE_TTL=3600
-      - CACHE_MAX_SIZE=1000
-      
-      # Redis configuration  
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-      - REDIS_MAX_CONNECTIONS=50
-      - REDIS_TIMEOUT=5
-      
       # Performance and concurrency (optimized for Apple Silicon)
       - OLLAMA_NUM_PARALLEL=4
       - OLLAMA_MAX_QUEUE=512
@@ -154,10 +107,7 @@ services:
       - ../config/config.yaml:/app/config/config.yaml:ro
       - ../logs:/app/logs
       - ../models:/app/models:ro  # Mount local models if available
-      - proxy_cache:/app/cache
     depends_on:
-      redis:
-        condition: service_healthy
       ollama:
         condition: service_healthy
     restart: unless-stopped
@@ -187,20 +137,12 @@ services:
       - NET_BIND_SERVICE
 
 volumes:
-  redis_data:
-    driver: local
   ollama_data:
     driver: local
     driver_opts:
       type: none
       o: bind
       device: ./data/ollama
-  proxy_cache:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./cache
 
 networks:
   ollama_network:

@@ -87,11 +87,8 @@ async def test_http_451_status_codes():
     config = MockConfig()
     guard_manager = MockGuardManager()
     concurrency_manager = ConcurrencyManager(config)
-    guard_cache = None
-    HAS_CACHE = False
-    
     # Create router with endpoints
-    router = create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_cache, HAS_CACHE)
+    router = create_ollama_endpoints(config, guard_manager, concurrency_manager)
     
     # Test data
     test_payload = {

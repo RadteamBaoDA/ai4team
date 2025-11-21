@@ -114,20 +114,6 @@ export_variables() {
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$PROJECT_ROOT/models/huggingface/transformers}"
     export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$PROJECT_ROOT/models/huggingface/datasets}"
     
-    # Cache configuration
-    export CACHE_ENABLED="${CACHE_ENABLED:-true}"
-    export CACHE_BACKEND="${CACHE_BACKEND:-auto}"
-    export CACHE_TTL="${CACHE_TTL:-3600}"
-    export CACHE_MAX_SIZE="${CACHE_MAX_SIZE:-1000}"
-    
-    # Redis configuration
-    export REDIS_ENABLED="${REDIS_ENABLED:-true}"
-    export REDIS_HOST="${REDIS_HOST:-localhost}"
-    export REDIS_PORT="${REDIS_PORT:-6379}"
-    export REDIS_DB="${REDIS_DB:-0}"
-    export REDIS_PASSWORD="${REDIS_PASSWORD:-}"
-    export REDIS_MAX_CONNECTIONS="${REDIS_MAX_CONNECTIONS:-50}"
-    
     # Concurrency monitoring
     export ENABLE_CONCURRENCY_MONITOR="${ENABLE_CONCURRENCY_MONITOR:-true}"
     export MONITOR_UPDATE_INTERVAL="${MONITOR_UPDATE_INTERVAL:-5.0}"

@@ -17,7 +17,6 @@ Environment Variables:
 
 import os
 import logging
-from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -239,6 +238,7 @@ def init_huggingface_with_retry(max_retries: int = 3, cache_dir: Optional[str] =
     
     try:
         import transformers
+        logger.debug('transformers module detected (version: %s)', getattr(transformers, '__version__', 'unknown'))
     except ImportError:
         logger.warning('transformers library is not installed')
         return False

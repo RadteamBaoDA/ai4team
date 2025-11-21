@@ -11,7 +11,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 # Initialize tiktoken offline mode BEFORE any other imports that depend on it
 from .utils.tiktoken_cache import setup_tiktoken_offline_mode
@@ -61,7 +60,6 @@ def cmd_validate_config(args: argparse.Namespace) -> None:
         print(f"  Proxy Port: {config.get('proxy_port', 8080)}")
         print(f"  Input Guard: {config.get_bool('enable_input_guard', True)}")
         print(f"  Output Guard: {config.get_bool('enable_output_guard', True)}")
-        print(f"  Cache Enabled: {config.get_bool('cache_enabled', True)}")
         
     except Exception as e:
         print(f"Error validating configuration: {e}")

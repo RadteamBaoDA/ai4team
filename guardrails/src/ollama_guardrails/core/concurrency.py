@@ -16,11 +16,9 @@ Features:
 import asyncio
 import logging
 import time
-import os
 import platform
 from typing import Dict, Optional, Any, Callable
 from dataclasses import dataclass, field
-from collections import defaultdict
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -497,7 +495,6 @@ class ConcurrencyManager:
                     
                     total_gb = meminfo.get('MemTotal', 0) / (1024 ** 2)
                     available_gb = meminfo.get('MemAvailable', 0) / (1024 ** 2)
-                    free_gb = meminfo.get('MemFree', 0) / (1024 ** 2)
                     used_gb = total_gb - available_gb
                     
                     memory_info = {

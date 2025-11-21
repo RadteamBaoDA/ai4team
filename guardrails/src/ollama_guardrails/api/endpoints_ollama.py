@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_cache, has_cache):
+def create_ollama_endpoints(config, guard_manager, concurrency_manager):
     """
     Create Ollama endpoints with dependency injection.
     
@@ -42,8 +42,6 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         config: Configuration object
         guard_manager: LLM Guard manager instance
         concurrency_manager: Concurrency manager instance
-        guard_cache: Cache instance (or None)
-        has_cache: Whether cache is available
     """
     
     # Import streaming handlers
@@ -125,20 +123,12 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
 
         # Define the processing coroutine
         async def process_request():
-            # Input guard with cache
+            # Input guard
             if config.get('enable_input_guard', True) and prompt:
-                input_result = None
-                if has_cache and guard_cache:
-                    input_result = await guard_cache.get_input_result(prompt)
-                    if input_result:
-                        logger.debug("Input scan cache hit")
-                if not input_result:
-                    input_result = await guard_manager.scan_input(prompt, block_on_error=config.get('block_on_guard_error', False))
-                    if has_cache and guard_cache:
-                        try:
-                            await guard_cache.set_input_result(prompt, input_result)
-                        except Exception:
-                            pass
+                input_result = await guard_manager.scan_input(
+                    prompt,
+                    block_on_error=config.get('block_on_guard_error', False)
+                )
                 if not input_result.get('allowed', True):
                     logger.warning("Input blocked by LLM Guard: %s", input_result)
                     failed_scanners = extract_failed_scanners(input_result)
@@ -199,21 +189,14 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
                 error_message = LanguageDetector.get_error_message('server_error', detected_lang)
                 raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
 
-            # Output guard with cache (non-streaming)
+            # Output guard (non-streaming)
             if config.get('enable_output_guard', True):
                 output_text = extract_text_from_response(data)
-                output_result = None
-                if output_text and has_cache and guard_cache:
-                    output_result = await guard_cache.get_output_result(output_text)
-                    if output_result:
-                        logger.debug("Output scan cache hit")
-                if output_result is None:
-                    output_result = await guard_manager.scan_output(output_text, prompt=prompt, block_on_error=config.get('block_on_guard_error', False))
-                    if output_text and has_cache and guard_cache:
-                        try:
-                            await guard_cache.set_output_result(output_text, output_result)
-                        except Exception:
-                            pass
+                output_result = await guard_manager.scan_output(
+                    output_text,
+                    prompt=prompt,
+                    block_on_error=config.get('block_on_guard_error', False)
+                )
                 if not output_result.get('allowed', True):
                     logger.warning("Output blocked by LLM Guard: %s", output_result)
                     
@@ -285,7 +268,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         """Proxy endpoint for Ollama /api/chat."""
         try:
             payload = await request.json()
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=400, detail={"error": "invalid_json"})
         
         # Extract model and prompt
@@ -306,23 +289,12 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         
         # Define processing coroutine
         async def process_chat_request():
-            # Scan input with cache
+            # Scan input
             if config.get('enable_input_guard', True) and prompt:
-                input_result = None
-                if has_cache and guard_cache:
-                    input_result = await guard_cache.get_input_result(prompt)
-                    if input_result:
-                        logger.debug("Input scan cache hit")
-                if not input_result:
-                    input_result = await guard_manager.scan_input(
-                        prompt,
-                        block_on_error=config.get('block_on_guard_error', False)
-                    )
-                    if has_cache and guard_cache:
-                        try:
-                            await guard_cache.set_input_result(prompt, input_result)
-                        except Exception:
-                            pass
+                input_result = await guard_manager.scan_input(
+                    prompt,
+                    block_on_error=config.get('block_on_guard_error', False)
+                )
                 if not input_result.get('allowed', True):
                     logger.warning(f"Chat input blocked by LLM Guard: {input_result}")
                     failed_scanners = extract_failed_scanners(input_result)

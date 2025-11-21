@@ -157,11 +157,6 @@ BLOCK_ON_GUARD_ERROR=false
 RATE_LIMIT_PER_MINUTE=60
 RATE_LIMIT_PER_HOUR=1000
 
-# Cache configuration
-CACHE_ENABLED=true
-CACHE_BACKEND=redis
-CACHE_TTL=3600
-
 # Performance
 OLLAMA_NUM_PARALLEL=auto
 REQUEST_TIMEOUT=300
@@ -172,8 +167,6 @@ REQUEST_TIMEOUT=300
 Data is stored in Docker volumes:
 
 - `ollama_data`: Ollama models and configuration
-- `redis_data`: Redis cache data  
-- `proxy_cache`: Proxy cache data
 
 **Backup volumes**:
 ```bash

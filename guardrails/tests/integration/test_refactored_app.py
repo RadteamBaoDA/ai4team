@@ -102,8 +102,6 @@ def test_factory_functions():
             config=config,
             guard_manager=guard_manager,
             concurrency_manager=concurrency_manager,
-            guard_cache=None,
-            HAS_CACHE=False
         )
         print(f"  ✅ Ollama router created: {len(ollama_router.routes)} routes")
         
@@ -113,8 +111,6 @@ def test_factory_functions():
             config=config,
             guard_manager=guard_manager,
             concurrency_manager=concurrency_manager,
-            guard_cache=None,
-            HAS_CACHE=False
         )
         print(f"  ✅ OpenAI router created: {len(openai_router.routes)} routes")
         
@@ -125,8 +121,6 @@ def test_factory_functions():
             guard_manager=guard_manager,
             ip_whitelist=ip_whitelist,
             concurrency_manager=concurrency_manager,
-            guard_cache=None,
-            HAS_CACHE=False
         )
         print(f"  ✅ Admin router created: {len(admin_router.routes)} routes")
         

@@ -89,11 +89,6 @@ proxy_port: 8080
 enable_input_guard: true
 enable_output_guard: true
 
-# Caching
-cache_enabled: true
-cache_backend: "memory"  # or "redis"
-cache_ttl: 3600
-
 # IP Whitelist (optional)
 nginx_whitelist:
   - "127.0.0.1"
@@ -119,7 +114,6 @@ nginx_whitelist:
 - `GET /health` - Health check
 - `GET /stats` - Performance statistics
 - `GET /config` - Current configuration
-- `POST /admin/cache/clear` - Clear cache
 
 ## Offline Mode
 
@@ -173,7 +167,6 @@ guardrails/
 │   │   └── endpoints_admin.py       # Admin endpoints
 │   ├── core/                        # Core functionality
 │   │   ├── config.py                # Configuration management
-│   │   ├── cache.py                 # Caching system
 │   │   └── concurrency.py          # Concurrency management
 │   ├── guards/                      # LLM Guard integration
 │   │   └── guard_manager.py         # Guard manager

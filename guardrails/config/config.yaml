@@ -74,22 +74,6 @@ use_local_models: false
 # Models should be organized in subdirectories by model name
 models_path: "./models"
 
-# Cache Configuration
-cache_enabled: true
-cache_backend: "auto"  # Options: 'redis', 'memory', 'auto' (tries Redis, falls back to memory)
-cache_ttl: 3600  # Time-to-live in seconds (1 hour)
-cache_max_size: 1000  # Max size for in-memory cache
-
-# Redis Configuration (for distributed caching)
-redis_enabled: true
-redis_host: "localhost"
-redis_port: 6379
-redis_db: 0
-redis_password: null  # Set if Redis requires authentication
-redis_max_connections: 50
-redis_timeout: 5  # Socket timeout in seconds
-redis_key_prefix: "llmguard:"
-
 # Rate Limiting Configuration
 rate_limit_enabled: true
 rate_limit_per_minute: 60

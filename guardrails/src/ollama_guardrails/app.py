@@ -24,7 +24,6 @@ from fastapi.responses import JSONResponse, ORJSONResponse
 # This warning comes from llm-guard dependencies, not our code
 warnings.filterwarnings('ignore', category=FutureWarning, module='transformers.utils.hub')
 
-from .core.cache import GuardCache
 from .core.concurrency import ConcurrencyManager
 from .core.config import Config
 from .guards.guard_manager import LLMGuardManager
@@ -76,15 +75,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
-# Check cache availability
-try:
-    HAS_CACHE = True
-except ImportError as e:
-    logger.warning(f"Cache not available: {e}")
-    HAS_CACHE = False
-    GuardCache = None  # type: ignore[misc,assignment]
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Lifespan context manager for startup and shutdown events."""
@@ -107,19 +97,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize the HTTP client on startup
     get_http_client()
     
-    # Initialize async components
-    if HAS_CACHE and hasattr(app.state, "guard_cache") and app.state.guard_cache:
-        await app.state.guard_cache.initialize()
-    
     config = app.state.config
-    guard_cache = getattr(app.state, "guard_cache", None)
     ip_whitelist = app.state.ip_whitelist
     
     logger.info("Application startup complete")
     logger.info(f"Ollama URL: {config.get('ollama_url')}")
     logger.info(f"Input guard: {'enabled' if config.get_bool('enable_input_guard', True) else 'disabled'}")
     logger.info(f"Output guard: {'enabled' if config.get_bool('enable_output_guard', True) else 'disabled'}")
-    logger.info(f"Cache: {'enabled' if guard_cache else 'disabled'}")
+    logger.info("Cache: disabled")
     logger.info(f"IP whitelist: {'enabled' if ip_whitelist.get_stats()['enabled'] else 'disabled'}")
     
     yield
@@ -169,25 +154,6 @@ def create_app(config_file: str | None = None) -> FastAPI:
             auto_detect_parallel=False,
         )
 
-    # Initialize cache
-    guard_cache = None
-    if HAS_CACHE:
-        cache_enabled = config.get_bool("cache_enabled", True)
-        if cache_enabled:
-            guard_cache = GuardCache(
-                enabled=True,
-                backend=config.get_str("cache_backend", "auto"),
-                max_size=config.get_int("cache_max_size", 1000),
-                ttl_seconds=config.get_int("cache_ttl", 3600),
-                redis_host=config.get_str("redis_host", "localhost"),
-                redis_port=config.get_int("redis_port", 6379),
-                redis_db=config.get_int("redis_db", 0),
-                redis_password=config.get_str("redis_password"),
-                redis_max_connections=config.get_int("redis_max_connections", 50),
-                redis_timeout=config.get_int("redis_timeout", 5),
-            )
-            logger.info(f"Guard cache initialized: backend={guard_cache.backend}")
-
     # Create FastAPI app with lifespan
     app = FastAPI(
         title="Ollama Guardrails",
@@ -202,7 +168,6 @@ def create_app(config_file: str | None = None) -> FastAPI:
     app.state.guard_manager = guard_manager
     app.state.ip_whitelist = ip_whitelist
     app.state.concurrency_manager = concurrency_manager
-    app.state.guard_cache = guard_cache
 
     # Configure CORS
     cors_allow_origins = config.get_list("cors_allow_origins") or ["*"]
@@ -321,16 +286,12 @@ def create_app(config_file: str | None = None) -> FastAPI:
         config=config,
         guard_manager=guard_manager,
         concurrency_manager=concurrency_manager,
-        guard_cache=guard_cache,
-        has_cache=HAS_CACHE,
     )
 
     openai_router = create_openai_endpoints(
         config=config,
         guard_manager=guard_manager,
         concurrency_manager=concurrency_manager,
-        guard_cache=guard_cache,
-        has_cache=HAS_CACHE,
     )
 
     admin_router = create_admin_endpoints(
@@ -338,8 +299,6 @@ def create_app(config_file: str | None = None) -> FastAPI:
         guard_manager=guard_manager,
         ip_whitelist=ip_whitelist,
         concurrency_manager=concurrency_manager,
-        guard_cache=guard_cache,
-        has_cache=HAS_CACHE,
     )
 
     # Include routers in the app

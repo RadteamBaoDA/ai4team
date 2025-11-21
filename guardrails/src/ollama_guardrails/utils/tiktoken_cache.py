@@ -18,8 +18,6 @@ Environment Variables:
 
 import os
 import logging
-import sys
-from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -142,7 +140,7 @@ def download_tiktoken_encoding(encoding_name: str = 'cl100k_base',
         logger.info(f'Downloading tiktoken encoding: {encoding_name}')
         
         # This will download and cache the encoding
-        encoding = tiktoken.get_encoding(encoding_name)
+        tiktoken.get_encoding(encoding_name)
         
         logger.info(f'Successfully cached encoding: {encoding_name}')
         return True
@@ -205,7 +203,7 @@ def init_tiktoken_with_retry(max_retries: int = 3, cache_dir: Optional[str] = No
     for attempt in range(max_retries):
         try:
             # Try to get a common encoding to test
-            encoding = tiktoken.get_encoding('cl100k_base')
+            tiktoken.get_encoding('cl100k_base')
             logger.info('Tiktoken initialized successfully')
             return True
         except Exception as e:

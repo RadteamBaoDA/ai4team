@@ -20,7 +20,6 @@ def sample_config():
         "proxy_port": 8080,
         "enable_input_guard": True,
         "enable_output_guard": True,
-        "cache_enabled": False,
     }
 
 

@@ -73,13 +73,13 @@ Successfully split the 1971-line monolithic `ollama_guard_proxy.py` into focused
 - `GET /api/version` - Get Ollama version
 
 **Key Features**:
-- Input and output guard scanning with caching
+- Input and output guard scanning
 - Concurrency control integration
 - Language detection for error messages
 - Failed scanner reporting
 - Connection cleanup optimization
 
-**Factory Function**: `create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_cache, HAS_CACHE)`
+**Factory Function**: `create_ollama_endpoints(config, guard_manager, concurrency_manager)`
 
 ---
 
@@ -99,19 +99,17 @@ Successfully split the 1971-line monolithic `ollama_guard_proxy.py` into focused
 - Usage token tracking
 - OpenAI to Ollama payload translation
 
-**Factory Function**: `create_openai_endpoints(config, guard_manager, concurrency_manager, guard_cache, HAS_CACHE)`
+**Factory Function**: `create_openai_endpoints(config, guard_manager, concurrency_manager)`
 
 ---
 
 ### 6. **endpoints_admin.py** (140 lines)
 **Purpose**: Admin and monitoring endpoints
 
-**Endpoints** (9 total):
+**Endpoints** (7 total):
 - `GET /health` - Health check with metrics
 - `GET /config` - Current configuration (non-sensitive)
 - `GET /stats` - Comprehensive statistics
-- `POST /admin/cache/clear` - Clear cache
-- `POST /admin/cache/cleanup` - Cleanup expired cache entries
 - `GET /queue/stats` - Queue statistics
 - `GET /queue/memory` - Memory information
 - `POST /admin/queue/reset` - Reset queue statistics
@@ -120,10 +118,9 @@ Successfully split the 1971-line monolithic `ollama_guard_proxy.py` into focused
 **Key Features**:
 - Non-sensitive configuration exposure
 - Real-time metrics and statistics
-- Cache management
 - Queue management and monitoring
 
-**Factory Function**: `create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_manager, guard_cache, HAS_CACHE)`
+**Factory Function**: `create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_manager)`
 
 ---
 
@@ -143,7 +140,6 @@ ollama_guard_proxy.py (main - to be refactored)
 │   ├── streaming_handlers.py
 │   ├── guard_manager.py
 │   ├── language.py
-│   ├── cache.py
 │   └── concurrency.py
 ├── endpoints_openai.py (4 OpenAI endpoints)
 │   ├── http_client.py
@@ -151,13 +147,11 @@ ollama_guard_proxy.py (main - to be refactored)
 │   ├── streaming_handlers.py
 │   ├── guard_manager.py
 │   ├── language.py
-│   ├── cache.py
 │   └── concurrency.py
-└── endpoints_admin.py (9 admin endpoints)
-    ├── guard_manager.py
-    ├── ip_whitelist.py
-    ├── concurrency.py
-    └── cache.py
+└── endpoints_admin.py (7 admin endpoints)
+   ├── guard_manager.py
+   ├── ip_whitelist.py
+   └── concurrency.py
 ```
 
 ## Dependency Injection Pattern
@@ -165,7 +159,7 @@ ollama_guard_proxy.py (main - to be refactored)
 All endpoint modules use factory functions that accept dependencies as parameters:
 
 ```python
-def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_cache, HAS_CACHE):
+def create_ollama_endpoints(config, guard_manager, concurrency_manager):
     """Create Ollama endpoints with injected dependencies."""
     
     @router.post("/api/generate")
@@ -173,7 +167,7 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager, guard_ca
         # Use config, guard_manager, etc. from closure
         ...
     
-    return router
+   return router
 ```
 
 This pattern provides:

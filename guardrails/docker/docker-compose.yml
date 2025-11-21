@@ -1,25 +1,6 @@
 version: '3.8'
 
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: ollama-redis
-    hostname: redis
-    ports:
-      - "127.0.0.1:6379:6379"  # Only accessible from localhost
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    networks:
-      - ollama_network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -64,19 +45,6 @@ services:
       - IP_WHITELIST=
       - IP_BLACKLIST=
       
-      # Cache configuration
-      - CACHE_ENABLED=true
-      - CACHE_BACKEND=redis
-      - CACHE_TTL=3600
-      - CACHE_MAX_SIZE=1000
-      
-      # Redis configuration
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-      - REDIS_MAX_CONNECTIONS=50
-      - REDIS_TIMEOUT=5
-      
       # Performance and concurrency
       - OLLAMA_NUM_PARALLEL=auto
       - OLLAMA_MAX_QUEUE=512
@@ -100,10 +68,7 @@ services:
       - ../config/config.yaml:/app/config/config.yaml:ro
       - ../logs:/app/logs
       - ../models:/app/models:ro
-      - proxy_cache:/app/cache
     depends_on:
-      redis:
-        condition: service_healthy
       ollama:
         condition: service_started
     restart: unless-stopped
@@ -118,10 +83,6 @@ services:
 
 volumes:
   ollama_data:
-    driver: local
-  redis_data:
-    driver: local
-  proxy_cache:
     driver: local
 
 networks:

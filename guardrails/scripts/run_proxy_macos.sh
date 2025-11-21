@@ -126,49 +126,6 @@ check_device_support() {
     echo ""
 }
 
-# Check Redis connection
-check_redis_connection() {
-    if [[ "$REDIS_ENABLED" != "true" ]]; then
-        log_warn "Redis caching disabled"
-        return 0
-    fi
-    
-    log_header "Checking Redis Connection..."
-    
-    # Check if redis-cli is available
-    if ! command -v redis-cli &> /dev/null; then
-        log_warn "redis-cli not installed, skipping connection check"
-        log_info "Redis connection will be tested by the application"
-        return 0
-    fi
-    
-    # Test Redis connection
-    local redis_cmd="redis-cli -h $REDIS_HOST -p $REDIS_PORT"
-    if [[ -n "$REDIS_PASSWORD" ]]; then
-        redis_cmd="$redis_cmd -a $REDIS_PASSWORD --no-auth-warning"
-    fi
-    
-    if $redis_cmd ping &>/dev/null; then
-        log_info "Redis connection OK ($REDIS_HOST:$REDIS_PORT)"
-        
-        # Get Redis info
-        local redis_version=$($redis_cmd INFO server 2>/dev/null | grep redis_version | cut -d':' -f2 | tr -d '\r')
-        local redis_memory=$($redis_cmd INFO memory 2>/dev/null | grep used_memory_human | cut -d':' -f2 | tr -d '\r')
-        
-        if [[ -n "$redis_version" ]]; then
-            log_info "Redis version: $redis_version"
-        fi
-        if [[ -n "$redis_memory" ]]; then
-            log_info "Redis memory: $redis_memory"
-        fi
-    else
-        log_warn "Cannot connect to Redis ($REDIS_HOST:$REDIS_PORT)"
-        log_warn "Proxy will fall back to in-memory cache"
-    fi
-    
-    echo ""
-}
-
 # Setup environment with Apple Silicon optimizations
 setup_environment() {
     log_header "Setting up environment for Apple Silicon..."
@@ -210,20 +167,6 @@ setup_environment() {
     export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-true}"
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$PROJECT_ROOT/models/huggingface/transformers}"
     export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$PROJECT_ROOT/models/huggingface/datasets}"
-    
-    # Cache configuration
-    export CACHE_ENABLED="${CACHE_ENABLED:-true}"
-    export CACHE_BACKEND="${CACHE_BACKEND:-auto}"
-    export CACHE_TTL="${CACHE_TTL:-3600}"
-    export CACHE_MAX_SIZE="${CACHE_MAX_SIZE:-1000}"
-    
-    # Redis configuration
-    export REDIS_ENABLED="${REDIS_ENABLED:-true}"
-    export REDIS_HOST="${REDIS_HOST:-localhost}"
-    export REDIS_PORT="${REDIS_PORT:-6379}"
-    export REDIS_DB="${REDIS_DB:-0}"
-    export REDIS_PASSWORD="${REDIS_PASSWORD:-}"
-    export REDIS_MAX_CONNECTIONS="${REDIS_MAX_CONNECTIONS:-50}"
     
     # Concurrency configuration (Ollama-style)
     export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-auto}"
@@ -293,7 +236,6 @@ start_proxy() {
     # Platform detection and setup
     detect_platform || return 1
     check_device_support
-    check_redis_connection
     setup_environment
     activate_venv || return 1
     
@@ -374,9 +316,9 @@ status_proxy() {
         log_error "Proxy is not running (no PID file)"
         return 1
     fi
-    
+
     local pid=$(cat "$PID_FILE")
-    
+
     if ps -p "$pid" > /dev/null 2>&1; then
         log_info "Proxy is running (PID: $pid)"
         echo ""
@@ -384,33 +326,10 @@ status_proxy() {
         echo "  Host: $HOST"
         echo "  Port: $PORT"
         echo "  Device: ${LLM_GUARD_DEVICE:-auto}"
-        echo "  Cache: ${CACHE_BACKEND:-auto} (TTL: ${CACHE_TTL:-3600}s)"
         echo "  Concurrency: ${OLLAMA_NUM_PARALLEL:-auto} parallel, ${OLLAMA_MAX_QUEUE:-512} queue"
         echo "  Log: $LOG_FILE"
         echo ""
-        
-        # Check Redis status if enabled
-        if [[ "$REDIS_ENABLED" == "true" ]] && command -v redis-cli &> /dev/null; then
-            local redis_cmd="redis-cli -h ${REDIS_HOST:-localhost} -p ${REDIS_PORT:-6379}"
-            if [[ -n "$REDIS_PASSWORD" ]]; then
-                redis_cmd="$redis_cmd -a $REDIS_PASSWORD --no-auth-warning"
-            fi
-            
-            if $redis_cmd ping &>/dev/null; then
-                echo "Redis:"
-                local redis_keys=$($redis_cmd DBSIZE 2>/dev/null | grep -o '[0-9]*' || echo "0")
-                local redis_memory=$($redis_cmd INFO memory 2>/dev/null | grep used_memory_human | cut -d':' -f2 | tr -d '\r' || echo "N/A")
-                echo "  Status: Connected ($REDIS_HOST:$REDIS_PORT)"
-                echo "  Keys: $redis_keys"
-                echo "  Memory: $redis_memory"
-                echo ""
-            else
-                echo "Redis:"
-                echo "  Status: Disconnected (using in-memory cache)"
-                echo ""
-            fi
-        fi
-        
+
         echo "Recent logs:"
         tail -5 "$LOG_FILE" 2>/dev/null || log_warn "No logs available"
         return 0
@@ -437,7 +356,6 @@ show_logs() {
 run_foreground() {
     detect_platform || exit 1
     check_device_support
-    check_redis_connection
     setup_environment
     activate_venv || exit 1
     
@@ -513,17 +431,6 @@ case "$COMMAND" in
         echo "  LLM_GUARD_USE_LOCAL_MODELS  - Use local models (default: false)"
         echo "  USE_VENV                    - Use virtual environment (default: true)"
         echo "  VENV_DIR                    - Venv directory (default: ./venv)"
-        echo ""
-        echo "Cache/Redis Variables:"
-        echo "  CACHE_ENABLED               - Enable caching (default: true)"
-        echo "  CACHE_BACKEND               - Backend: auto, redis, memory (default: auto)"
-        echo "  CACHE_TTL                   - Cache TTL in seconds (default: 3600)"
-        echo "  REDIS_ENABLED               - Enable Redis (default: true)"
-        echo "  REDIS_HOST                  - Redis host (default: localhost)"
-        echo "  REDIS_PORT                  - Redis port (default: 6379)"
-        echo "  REDIS_PASSWORD              - Redis password (default: empty)"
-        echo "  REDIS_DB                    - Redis database number (default: 0)"
-        echo "  REDIS_MAX_CONNECTIONS       - Max connections (default: 50)"
         echo ""
         echo "Concurrency Variables (Ollama-style):"
         echo "  OLLAMA_NUM_PARALLEL         - Max parallel requests per model"

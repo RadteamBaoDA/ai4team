@@ -114,8 +114,6 @@ def _make_test_client(guard_manager, overrides=None):
         config=config,
         guard_manager=guard_manager,
         concurrency_manager=ImmediateConcurrencyManager(),
-        guard_cache=None,
-        has_cache=False,
     )
 
     app = FastAPI()

@@ -30,7 +30,7 @@ All performance monitoring and advanced security features have been removed from
 - Performance-related data from `/health`, `/stats`, and `/config` endpoints
 
 **Changed:**
-- `HAS_OPTIMIZATIONS` flag replaced with `HAS_CACHE` (cache-only)
+- Removed `HAS_OPTIMIZATIONS` / `HAS_CACHE` toggles now that guard caching is gone
 - Simplified error handling without performance tracking
 
 ### config.yaml
@@ -55,7 +55,6 @@ All performance monitoring and advanced security features have been removed from
 ## Features Still Available
 
 ✅ **LLM Guard** - Input/output scanning with llm-guard
-✅ **Caching** - Redis and in-memory caching for guard results
 ✅ **Concurrency Management** - Ollama-style queue management
 ✅ **IP Whitelisting** - Nginx access control
 ✅ **Language Detection** - Multi-language error messages
@@ -156,7 +155,7 @@ rate_limit_burst: 10
             ▼
 ┌─────────────────────────────────┐
 │   Guardrails Proxy              │  ← LLM content scanning
-│   - Input/output guards         │  ← Caching
+│   - Input/output guards         │
 │   - Streaming support           │  ← Concurrency management
 │   - OpenAI compatibility        │
 └───────────┬─────────────────────┘

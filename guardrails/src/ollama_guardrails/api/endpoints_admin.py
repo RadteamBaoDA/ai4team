@@ -5,24 +5,19 @@ This module contains administrative and monitoring endpoints:
 - Health check (/health)
 - Configuration (/config)
 - Statistics (/stats)
-- Cache management (/admin/cache/*)
 - Queue management (/queue/*, /admin/queue/*)
 """
 
-import logging
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-
-logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter()
 
 
-def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_manager, guard_cache, has_cache):
+def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_manager):
     """
     Create admin and monitoring endpoints with dependency injection.
     
@@ -31,8 +26,6 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
         guard_manager: LLM Guard manager instance
         ip_whitelist: IP whitelist manager
         concurrency_manager: Concurrency manager instance
-        guard_cache: Cache instance (or None)
-        has_cache: Whether cache is available
     """
     
     @router.get("/health")
@@ -61,10 +54,6 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
         if hasattr(guard_manager, 'device'):
             health_data['device'] = guard_manager.device
         
-        # Add cache stats if available
-        if has_cache and guard_cache:
-            health_data['cache'] = await guard_cache.get_stats()
-        
         return health_data
 
     @router.get("/config")
@@ -85,15 +74,9 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
         wl = ip_whitelist.get_stats()
         safe_config['nginx_whitelist'] = {'enabled': wl['enabled'], 'count': wl['count']}
         
-        # Add optimization status
-        if has_cache:
-            safe_config['optimizations'] = {
-                'cache_enabled': guard_cache is not None and guard_cache.enabled,
-            }
-            
-            # Add device info
-            if hasattr(guard_manager, 'device'):
-                safe_config['device'] = guard_manager.device
+        # Add device info
+        if hasattr(guard_manager, 'device'):
+            safe_config['device'] = guard_manager.device
         
         return safe_config
 
@@ -110,30 +93,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
             "whitelist": ip_whitelist.get_stats(),
         }
         
-        if has_cache:
-            # Cache stats
-            if guard_cache:
-                stats['cache'] = await guard_cache.get_stats()
-        
         return stats
-
-    @router.post("/admin/cache/clear")
-    async def clear_cache():
-        """Clear the cache (admin endpoint)."""
-        if not has_cache or not guard_cache:
-            return {"error": "Cache not available"}
-        
-        await guard_cache.clear()
-        return {"status": "success", "message": "Cache cleared"}
-
-    @router.post("/admin/cache/cleanup")
-    async def cleanup_cache():
-        """Clean up expired cache entries."""
-        if not has_cache or not guard_cache:
-            return {"error": "Cache not available"}
-        
-        removed = await guard_cache.cleanup_expired()
-        return {"status": "success", "removed": removed}
 
     @router.get("/queue/stats")
     async def get_queue_stats(model: Optional[str] = None):
