@@ -68,15 +68,37 @@ If LibreOffice is not available, the application will fall back to Python librar
 
 ## Installation
 
-1. Install Python dependencies:
+1. Install the [uv](https://github.com/astral-sh/uv) package manager (fast Python installer). On Windows you can run `winget install --id Astral.UV -e`; on macOS use `brew install uv`; on Linux run `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+
+2. Run the platform installer in this folder:
 
 ```bash
-pip install -r requirements.txt
+# Windows
+install.bat
+
+# Linux / macOS
+chmod +x install.sh
+./install.sh
 ```
 
-**Note**: v2.5 includes `tqdm` for progress bars. If not installed, the converter works fine with a fallback implementation.
+The script creates `../.venv` with `uv venv` and syncs `requirements.txt` using `uv pip install` for reproducible installs.
 
-2. (Optional but recommended) Install LibreOffice for best results.
+3. (Optional) Manual uv commands if you prefer to run them yourself:
+
+```bash
+# Create the virtual environment next to this folder
+uv venv ../.venv
+
+# Install dependencies into it
+uv pip install --python ../.venv/bin/python -r requirements.txt        # Linux/macOS
+uv pip install --python ..\.venv\Scripts\python.exe -r requirements.txt  # Windows
+```
+
+4. (Optional but recommended) Install LibreOffice for best results.
+
+> Still on pip? Run `pip install -r requirements.txt`, but uv is significantly faster and keeps the repo-standard `.venv` in sync.
+
+**Note**: v2.5 includes `tqdm` for progress bars. If not installed, the converter works fine with a fallback implementation.
 
 ## Configuration
 

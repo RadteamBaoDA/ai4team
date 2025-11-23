@@ -8,8 +8,9 @@ Quick guide to using the new v2.5 intelligent workload management features.
 
 ### Installation
 ```bash
-# Install dependencies (includes tqdm for progress bars)
-pip install -r requirements.txt
+# Install dependencies with uv (includes tqdm for progress bars)
+uv venv ../.venv
+uv pip install --python ../.venv/bin/python -r requirements.txt
 
 # Verify installation
 python tests/test_v2.5_features.py
@@ -310,10 +311,10 @@ converter = DocumentConverter()  # All features enabled
 ### Progress Bar Not Showing
 ```bash
 # Check if tqdm is installed
-pip show tqdm
+uv pip show tqdm
 
 # Install if missing
-pip install tqdm>=4.66.0
+uv pip install tqdm>=4.66.0
 ```
 
 ### Cache Not Working
@@ -355,8 +356,9 @@ print(f"Large: {len(categorized['large'])}")
 ## 🎯 Quick Command Reference
 
 ```bash
-# Install v2.5
-pip install -r requirements.txt
+# Install v2.5 with uv
+uv venv ../.venv
+uv pip install --python ../.venv/bin/python -r requirements.txt
 
 # Run tests
 python tests/test_v2.5_features.py

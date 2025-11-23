@@ -4,21 +4,23 @@
 
 ### Windows:
 ```bash
-# Run the installation script
+# Run the installation script (recommended)
 install.bat
 
-# Or manually:
-pip install -r requirements.txt
+# Or manually with uv
+uv venv ..\.venv
+uv pip install --python ..\.venv\Scripts\python.exe -r requirements.txt
 ```
 
 ### Linux/macOS:
 ```bash
-# Run the installation script
+# Run the installation script (recommended)
 chmod +x install.sh
 ./install.sh
 
-# Or manually:
-pip3 install -r requirements.txt
+# Or manually with uv
+uv venv ../.venv
+uv pip install --python ../.venv/bin/python -r requirements.txt
 ```
 
 ## Basic Usage
@@ -139,7 +141,7 @@ documents/          pdfs/
 
 ### "No module named 'docx2pdf'"
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 ### "LibreOffice not found"

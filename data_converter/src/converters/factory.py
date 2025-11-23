@@ -27,10 +27,10 @@ class ConverterFactory:
         self.pptx_converter = PptxConverter()
         self.csv_converter = CsvConverter()
         
-        # Define priority order with Microsoft Office first
+        # Define priority order
         self._primary_converters = [
-            self.ms_office,
-            self.libreoffice
+            self.libreoffice,
+            self.ms_office
         ]
     
     def get_converters_for_file(self, file_path: Path) -> List[BaseConverter]:

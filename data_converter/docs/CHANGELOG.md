@@ -124,7 +124,7 @@ converter = DocumentConverter(
 
 **Install new dependency**:
 ```bash
-pip install tqdm>=4.66.0
+uv pip install tqdm>=4.66.0
 ```
 
 **Verify installation**:
@@ -309,7 +309,7 @@ See git history for previous version details.
 
 ```bash
 # 1. Install new dependency
-pip install tqdm>=4.66.0
+uv pip install tqdm>=4.66.0
 
 # 2. Test the upgrade
 python tests/test_v2.5_features.py
