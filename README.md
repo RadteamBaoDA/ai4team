@@ -57,6 +57,9 @@ ai4team/
 └── monitor/                 # Monitoring & Observability
     ├── langfuse.compose.yml          # Langfuse deployment
     └── README.md                     # 📖 Monitoring setup guide
+
+### Local Utilities
+- **structure_understand/** – A lightweight CLI that walks a codebase, summarizes files with Ollama/OpenAI, and emits Markdown, JSON, and Tabler-styled HTML reports (complete with searchable tables, path filters, and raw JSON dumps). Run the tool with `uv run python structure_understand/app.py` or `PYTHONPATH=src python structure_understand/app.py` to ensure the new `src` layout is respected when you edit the modules in-tree. The HTML output now renders a Tabler `<table>`, exposes the serialized payload, and shows plain-text summaries for quick review while the CLI writes the same data to a configurable `json_output_file` for downstream tooling.
 ```
 
 ## 🚀 Quick Start
