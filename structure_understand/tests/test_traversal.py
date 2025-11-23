@@ -19,6 +19,7 @@ def _build_config(tmp_path: Path) -> StructureConfig:
         summary_workers=2,
         summary_extensions=[],
         html_output_file=tmp_path / "report.html",
+        json_output_file=tmp_path / "report.json",
     )
 
 

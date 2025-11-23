@@ -42,6 +42,7 @@ The CLI resolves the configured `input_root`, traverses every folder/file, and w
 ## Interactive HTML output
 - The CLI emits an HTML version of the report (default next to the Markdown file) that uses the Tabler design system and a Tabulator-powered table.
 - A sticky search input filters the table by path or summary text so you can quickly locate files or folders.
+- The CLI also writes a `structure_summary.json` file (configurable via `json_output_file`) containing the same table data, letting other tooling consume the structural overview or powering the HTML report’s client-side table instead of embedding the dataset directly.
 
 ## Development
 The code lives under `src`. When editing modules directly, run the CLI via the `uv` runner or by setting `PYTHONPATH=src`:

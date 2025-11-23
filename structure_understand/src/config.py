@@ -20,6 +20,7 @@ class StructureConfig:
     summary_workers: int
     summary_extensions: list[str]
     html_output_file: Path
+    json_output_file: Path
 
 
 def _resolve_path(base: Path, raw_value: Any) -> Path:
@@ -54,6 +55,7 @@ def load_config(path: Path) -> StructureConfig:
     input_root = _resolve_path(base, raw.get("input_root", "../input"))
     output_file = _resolve_path(base, raw.get("output_file", "structure_summary.md"))
     html_output_file = _resolve_path(base, raw.get("html_output_file", "structure_summary.html"))
+    json_output_file = _resolve_path(base, raw.get("json_output_file", "structure_summary.json"))
     exclude_paths = list(raw.get("exclude_paths", []))
     max_file_bytes = raw.get("max_file_bytes")
     if max_file_bytes is not None:
@@ -79,4 +81,5 @@ def load_config(path: Path) -> StructureConfig:
         summary_workers=summary_workers,
         summary_extensions=summary_extensions,
         html_output_file=html_output_file,
+        json_output_file=json_output_file,
     )

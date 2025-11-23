@@ -13,8 +13,9 @@ def test_html_report_includes_search_and_tree(tmp_path: Path) -> None:
 
     html = build_html_report(entries, tmp_path / "input", config_path)
 
-    assert "Search files or folders" in html
-    assert "tabulator-tables@6.3.5" in html
-    assert "tabulator-table" in html
-    assert "Summary text view" in html
+    assert "Structure map for" in html
+    assert "Filter by path" in html
+    assert "table card-table" in html
+    assert "Data JSON" in html
+    assert "Entries (Markdown)" in html
     assert "Generated from" in html

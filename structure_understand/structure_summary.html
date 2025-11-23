@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/js/tabler.min.js"></script>
+<title>Structure map for D:\Project\ai4team\structure_understand\input</title>
+</head>
+<body class="antialiased bg-body">
+<div class="page">
+<div class="page-body">
+<div class="container py-4">
+<div class="card shadow-sm">
+<div class="card-header">
+<h2 class="card-title">Structure map for D:\Project\ai4team\structure_understand\input</h2>
+<p class="text-muted mb-0">Generated from D:\Project\ai4team\structure_understand\config.yaml</p>
+</div>
+<div class="card-body">
+<div class="d-flex align-items-center mb-3">
+<label class="form-label text-muted me-2 mb-0" for="path-filter-input">Filter by path:</label>
+<input id="path-filter-input" class="form-control form-control-sm w-50" placeholder="Enter path text" autocomplete="off">
+</div>
+<div class="table-responsive">
+<table id="entries-table" class="table card-table table-striped table-hover">
+<thead>
+<tr>
+<th>Path</th>
+<th>Type</th>
+<th class="text-end">Size</th>
+<th>Summary</th>
+</tr>
+</thead>
+<tbody>
+
+        <tr>
+          <td class="text-nowrap">./</td>
+          <td>folder</td>
+          <td class="text-end"></td>
+          <td>Contains 2 subfolders</td>
+        </tr>
+        
+
+        <tr>
+          <td class="text-nowrap">./pptx</td>
+          <td>folder</td>
+          <td class="text-end"></td>
+          <td>Contains 1 subfolder</td>
+        </tr>
+        
+
+        <tr>
+          <td class="text-nowrap">./pptx/1</td>
+          <td>folder</td>
+          <td class="text-end"></td>
+          <td>Contains 1 subfolder</td>
+        </tr>
+        
+
+        <tr>
+          <td class="text-nowrap">./pptx/1/2</td>
+          <td>folder</td>
+          <td class="text-end"></td>
+          <td>Contains 1 subfolder</td>
+        </tr>
+        
+
+        <tr>
+          <td class="text-nowrap">./pptx/1/2/3</td>
+          <td>folder</td>
+          <td class="text-end"></td>
+          <td>Contains 1 file</td>
+        </tr>
+        
+
+        <tr>
+          <td class="text-nowrap">./pptx/1/2/3/Performance_Testing_Presentation.pptx</td>
+          <td>file</td>
+          <td class="text-end">35398</td>
+          <td>**Summary of “Performance_Testing_Presentation.pptx” (1/27/13)**    | Section | Key Points | Supporting Details | |---------|------------|--------------------| | **Purpose** | Demonstrate how to evaluate and improve the performance of a Windows desktop application and its underlying Web Service. | • Focus on both client‑side (UI) and server‑side (API) performance. &lt;br&gt;• Emphasize the need for regular, repeatable tests after each release. | | **Client‑Side Performance Testing** | • Measure UI responsiveness and load times. &lt;br&gt;• Identify bottlenecks in the desktop app before and after switching to a Web Service. | • **Before Web Service** – load local data, profile with Visual Studio Profiler. &lt;br&gt;• **After Web Service** – call API to fetch settings/files, measure load time with Fiddler, logging, and profiler. &lt;br&gt;• Metrics: First Contentful Paint (FCP), Time to Interactive (TTI), DOM load time, JavaScript execution time. &lt;br&gt;• Tools: Google Lighthouse, WebPageTest, Chrome DevTools Performance panel. | | **Server‑Side Load Testing** | • Test the Web API’s ability to handle concurrent clients. &lt;br&gt;• Capture average response time, error rate, and throughput. | • **Tool** – Apache JMeter. &lt;br&gt;• **Test Plan** – Thread Group + HTTP Request sampler. &lt;br&gt;• **Scenario Example** – 500 requests/second for 1 minute to `/getFile`. &lt;br&gt;• **Results** – Avg = 780 ms, 95th = 1450 ms, Error Rate = 2 %. &lt;br&gt;• **Optimization Tips** – increase thread pool size, optimize I/O, enable GZIP compression. | | **Combined Approach** | • Use client‑side metrics to improve user experience. &lt;br&gt;• Use load‑test metrics to define system limits. | • Run both tests in parallel or sequentially to get a holistic view. &lt;br&gt;• Combine results to pinpoint whether UI delays are due to network/API latency or local processing. | | **Tools &amp; References** | • Google Lighthouse, JMeter, GTmetrix, Visual Studio Profiler, Fiddler, WebPageTest.org. | • Official documentation links (not included in the slide but referenced). | | **Recommendations** | • Execute tests regularly, especially after code or infrastructure changes. &lt;br&gt;• Document baseline metrics and track deviations. &lt;br&gt;• Address identified bottlenecks (e.g., increase pool size, enable compression). | • Suggested to run tests in a staging environment that mirrors production. | | **Side Effects / Risks** | • High error rates may indicate server overload or network issues. &lt;br&gt;• Poor client‑side performance can degrade perceived UX even if server metrics are fine. | • Monitoring for spikes in latency or error counts is essential. | | **Expected Inputs for Tests** | • API endpoint URLs, authentication tokens, request payloads. &lt;br&gt;• Desired concurrency level (threads/users), test duration, and request rate. | • JMeter test plan configuration (Thread Group settings, HTTP Request sampler). |  **Overall Message**   The presentation argues that effective performance testing requires a dual focus: measuring the end‑user experience on the client side and quantifying the server’s capacity to handle load. By combining tools such as Lighthouse for UI metrics and JMeter for API load testing, teams can identify bottlenecks, optimize system components, and maintain a high‑quality user experience. Regular, repeatable testing after each deployment is essential to ensure that performance regressions are caught early.</td>
+        </tr>
+        
+
+        <tr>
+          <td class="text-nowrap">./sample2xlxs</td>
+          <td>folder</td>
+          <td class="text-end"></td>
+          <td>Contains 1 file</td>
+        </tr>
+        
+
+        <tr>
+          <td class="text-nowrap">./sample2xlxs/Xay-dung-cau-hinh.xlsx</td>
+          <td>file</td>
+          <td class="text-end">12721</td>
+          <td>**File Summary – sample2xlxs/Xay‑dung‑cau‑hinh.xlsx**  | Section | What it contains | Key details | |---------|------------------|-------------| | **Price list (Bảng báo giá chi tiết)** | A table that lists the cost of each component needed to build a PC. | • **CPU** – Intel Core Ultra 7 (265 K / Turbo up to 5.5 GHz, 20 cores/20 threads, 30 MB cache, LGA 1851) – 8 590 000 ₫ (qty 1) &lt;br&gt;• **Motherboard** – ASUS PRIME Z890‑P WIFI CSM (DDR5) – 7 490 000 ₫ &lt;br&gt;• **RAM** – Corsair Vengeance DDR5 64 GB (2 × 32 GB, 6000 MHz) – 5 490 000 ₫ (qty 2) &lt;br&gt;• **GPU** – (price only) 29 990 000 ₫ &lt;br&gt;• **SSD** – 1 TB (price 2 990 000 ₫) &lt;br&gt;• **PSU** – ASUS TUF Gaming 1000 W, 80 Plus Gold, full‑modular – 4 750 000 ₫ &lt;br&gt;• **Case** – Coolermaster MasterBox MB520 TG ARGB – 2 150 000 ₫ &lt;br&gt;• **Cooling** – Deepcool LT720 AIO – 2 790 000 ₫ &lt;br&gt;• **Total** – 69 730 000 ₫ |  | Section | What it contains | Key details | |---------|------------------|-------------| | **Component list** | A flat list of alternative parts that can be mixed and matched for different builds. | • **CPU** – Intel i5‑14600KF, Intel Xeon E5‑2680 v4 (14 core/28 threads) &lt;br&gt;• **Motherboards** – MSI MPG B760M EDGE TI WIFI, ASUS PRIME Z890‑P, GIGABYTE GP‑AG4500G, MSI A750GF, Huanazhi X99 F8D Plus &lt;br&gt;• **RAM** – Corsair Dominator Platinum RGB 64 GB 5200 MHz, ECC DDR4 15 GB 2400, Galax 1060 6 GB &lt;br&gt;• **GPU** – MSI RTX 3070 Ti Gaming X Trio, ZOTAC GeForce RTX 4070 Ti SUPER Trinity OC, others &lt;br&gt;• **SSD** – Kingston NV3 1 TB M.2 PCIe Gen4 x4 NVMe, other models &lt;br&gt;• **PSU** – MIK SPOWER 650 W, other units &lt;br&gt;• **Cooling** – MAG CORELIQUID 240R V2, other AIO units |  | Section | What it contains | Key details | |---------|------------------|-------------| | **Numeric sequences** | A series of numbers that appear to be cell coordinates or data mapping references. | • Example: “0 1 2 3 4 5 6 7 8 9 8 10 11 12 9 12 13 14 15 16 17 18 42 19 9 19 20 41 21 9 21 23 24 25 9 25 26 27 28 9 28 29 30 31 9 31 22 32 33” &lt;br&gt;• These likely correspond to row/column indices used in the spreadsheet’s formulas or data validation rules. |  ---  ### Purpose of the File The spreadsheet serves as a **configuration guide and cost calculator** for building personal computers. It provides:  1. **A detailed price breakdown** for a reference build (CPU, motherboard, RAM, GPU, SSD, PSU, case, cooling). 2. **A catalog of alternative components** that can be swapped in to create different builds (e.g., higher‑end GPUs, different CPUs, varied RAM capacities). 3. **Underlying data references** (numeric sequences) that support the spreadsheet’s calculations or data validation.  ### Main Message - **Transparency in cost**: Users can see exactly how each component contributes to the total price. - **Flexibility**: The component list allows users to tailor the build to their performance needs or budget constraints. - **Data integrity**: The numeric sequences suggest that the spreadsheet uses structured references to maintain consistency across calculations.  ### Supporting Details - All prices are listed in Vietnamese đồng (₫). - Quantities are specified for each item (e.g., 2 × 32 GB RAM modules). - The total cost is calculated automatically based on the unit prices and quantities.  ### Side Effects / Expected Inputs - **No explicit side effects** are noted; the file is purely informational. - **Expected inputs**: Users may need to adjust quantities or replace items from the component list to reflect their own build choices. The spreadsheet likely recalculates the total cost automatically when such changes are made.  ---  **Bottom line:**   The file is a practical tool for anyone planning to assemble a PC, offering a ready‑made cost estimate and a flexible set of component options. It is organized in Vietnamese, with clear sections for pricing, component alternatives, and underlying data references that support accurate calculations.</td>
+        </tr>
+        
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="card mt-4">
+<div class="card-header">
+<strong>Data JSON</strong>
+</div>
+<div class="card-body bg-dark text-white">
+<pre class="mb-0">[{&quot;path&quot;: &quot;./&quot;, &quot;kind&quot;: &quot;folder&quot;, &quot;size&quot;: &quot;&quot;, &quot;summary&quot;: &quot;Contains 2 subfolders&quot;}, {&quot;path&quot;: &quot;./pptx&quot;, &quot;kind&quot;: &quot;folder&quot;, &quot;size&quot;: &quot;&quot;, &quot;summary&quot;: &quot;Contains 1 subfolder&quot;}, {&quot;path&quot;: &quot;./pptx/1&quot;, &quot;kind&quot;: &quot;folder&quot;, &quot;size&quot;: &quot;&quot;, &quot;summary&quot;: &quot;Contains 1 subfolder&quot;}, {&quot;path&quot;: &quot;./pptx/1/2&quot;, &quot;kind&quot;: &quot;folder&quot;, &quot;size&quot;: &quot;&quot;, &quot;summary&quot;: &quot;Contains 1 subfolder&quot;}, {&quot;path&quot;: &quot;./pptx/1/2/3&quot;, &quot;kind&quot;: &quot;folder&quot;, &quot;size&quot;: &quot;&quot;, &quot;summary&quot;: &quot;Contains 1 file&quot;}, {&quot;path&quot;: &quot;./pptx/1/2/3/Performance_Testing_Presentation.pptx&quot;, &quot;kind&quot;: &quot;file&quot;, &quot;size&quot;: 35398, &quot;summary&quot;: &quot;**Summary of “Performance_Testing_Presentation.pptx” (1/27/13)**    | Section | Key Points | Supporting Details | |---------|------------|--------------------| | **Purpose** | Demonstrate how to evaluate and improve the performance of a Windows desktop application and its underlying Web Service. | • Focus on both client‑side (UI) and server‑side (API) performance. &lt;br&gt;• Emphasize the need for regular, repeatable tests after each release. | | **Client‑Side Performance Testing** | • Measure UI responsiveness and load times. &lt;br&gt;• Identify bottlenecks in the desktop app before and after switching to a Web Service. | • **Before Web Service** – load local data, profile with Visual Studio Profiler. &lt;br&gt;• **After Web Service** – call API to fetch settings/files, measure load time with Fiddler, logging, and profiler. &lt;br&gt;• Metrics: First Contentful Paint (FCP), Time to Interactive (TTI), DOM load time, JavaScript execution time. &lt;br&gt;• Tools: Google Lighthouse, WebPageTest, Chrome DevTools Performance panel. | | **Server‑Side Load Testing** | • Test the Web API’s ability to handle concurrent clients. &lt;br&gt;• Capture average response time, error rate, and throughput. | • **Tool** – Apache JMeter. &lt;br&gt;• **Test Plan** – Thread Group + HTTP Request sampler. &lt;br&gt;• **Scenario Example** – 500 requests/second for 1 minute to `/getFile`. &lt;br&gt;• **Results** – Avg = 780 ms, 95th = 1450 ms, Error Rate = 2 %. &lt;br&gt;• **Optimization Tips** – increase thread pool size, optimize I/O, enable GZIP compression. | | **Combined Approach** | • Use client‑side metrics to improve user experience. &lt;br&gt;• Use load‑test metrics to define system limits. | • Run both tests in parallel or sequentially to get a holistic view. &lt;br&gt;• Combine results to pinpoint whether UI delays are due to network/API latency or local processing. | | **Tools &amp; References** | • Google Lighthouse, JMeter, GTmetrix, Visual Studio Profiler, Fiddler, WebPageTest.org. | • Official documentation links (not included in the slide but referenced). | | **Recommendations** | • Execute tests regularly, especially after code or infrastructure changes. &lt;br&gt;• Document baseline metrics and track deviations. &lt;br&gt;• Address identified bottlenecks (e.g., increase pool size, enable compression). | • Suggested to run tests in a staging environment that mirrors production. | | **Side Effects / Risks** | • High error rates may indicate server overload or network issues. &lt;br&gt;• Poor client‑side performance can degrade perceived UX even if server metrics are fine. | • Monitoring for spikes in latency or error counts is essential. | | **Expected Inputs for Tests** | • API endpoint URLs, authentication tokens, request payloads. &lt;br&gt;• Desired concurrency level (threads/users), test duration, and request rate. | • JMeter test plan configuration (Thread Group settings, HTTP Request sampler). |  **Overall Message**   The presentation argues that effective performance testing requires a dual focus: measuring the end‑user experience on the client side and quantifying the server’s capacity to handle load. By combining tools such as Lighthouse for UI metrics and JMeter for API load testing, teams can identify bottlenecks, optimize system components, and maintain a high‑quality user experience. Regular, repeatable testing after each deployment is essential to ensure that performance regressions are caught early.&quot;}, {&quot;path&quot;: &quot;./sample2xlxs&quot;, &quot;kind&quot;: &quot;folder&quot;, &quot;size&quot;: &quot;&quot;, &quot;summary&quot;: &quot;Contains 1 file&quot;}, {&quot;path&quot;: &quot;./sample2xlxs/Xay-dung-cau-hinh.xlsx&quot;, &quot;kind&quot;: &quot;file&quot;, &quot;size&quot;: 12721, &quot;summary&quot;: &quot;**File Summary – sample2xlxs/Xay‑dung‑cau‑hinh.xlsx**  | Section | What it contains | Key details | |---------|------------------|-------------| | **Price list (Bảng báo giá chi tiết)** | A table that lists the cost of each component needed to build a PC. | • **CPU** – Intel Core Ultra 7 (265 K / Turbo up to 5.5 GHz, 20 cores/20 threads, 30 MB cache, LGA 1851) – 8 590 000 ₫ (qty 1) &lt;br&gt;• **Motherboard** – ASUS PRIME Z890‑P WIFI CSM (DDR5) – 7 490 000 ₫ &lt;br&gt;• **RAM** – Corsair Vengeance DDR5 64 GB (2 × 32 GB, 6000 MHz) – 5 490 000 ₫ (qty 2) &lt;br&gt;• **GPU** – (price only) 29 990 000 ₫ &lt;br&gt;• **SSD** – 1 TB (price 2 990 000 ₫) &lt;br&gt;• **PSU** – ASUS TUF Gaming 1000 W, 80 Plus Gold, full‑modular – 4 750 000 ₫ &lt;br&gt;• **Case** – Coolermaster MasterBox MB520 TG ARGB – 2 150 000 ₫ &lt;br&gt;• **Cooling** – Deepcool LT720 AIO – 2 790 000 ₫ &lt;br&gt;• **Total** – 69 730 000 ₫ |  | Section | What it contains | Key details | |---------|------------------|-------------| | **Component list** | A flat list of alternative parts that can be mixed and matched for different builds. | • **CPU** – Intel i5‑14600KF, Intel Xeon E5‑2680 v4 (14 core/28 threads) &lt;br&gt;• **Motherboards** – MSI MPG B760M EDGE TI WIFI, ASUS PRIME Z890‑P, GIGABYTE GP‑AG4500G, MSI A750GF, Huanazhi X99 F8D Plus &lt;br&gt;• **RAM** – Corsair Dominator Platinum RGB 64 GB 5200 MHz, ECC DDR4 15 GB 2400, Galax 1060 6 GB &lt;br&gt;• **GPU** – MSI RTX 3070 Ti Gaming X Trio, ZOTAC GeForce RTX 4070 Ti SUPER Trinity OC, others &lt;br&gt;• **SSD** – Kingston NV3 1 TB M.2 PCIe Gen4 x4 NVMe, other models &lt;br&gt;• **PSU** – MIK SPOWER 650 W, other units &lt;br&gt;• **Cooling** – MAG CORELIQUID 240R V2, other AIO units |  | Section | What it contains | Key details | |---------|------------------|-------------| | **Numeric sequences** | A series of numbers that appear to be cell coordinates or data mapping references. | • Example: “0 1 2 3 4 5 6 7 8 9 8 10 11 12 9 12 13 14 15 16 17 18 42 19 9 19 20 41 21 9 21 23 24 25 9 25 26 27 28 9 28 29 30 31 9 31 22 32 33” &lt;br&gt;• These likely correspond to row/column indices used in the spreadsheet’s formulas or data validation rules. |  ---  ### Purpose of the File The spreadsheet serves as a **configuration guide and cost calculator** for building personal computers. It provides:  1. **A detailed price breakdown** for a reference build (CPU, motherboard, RAM, GPU, SSD, PSU, case, cooling). 2. **A catalog of alternative components** that can be swapped in to create different builds (e.g., higher‑end GPUs, different CPUs, varied RAM capacities). 3. **Underlying data references** (numeric sequences) that support the spreadsheet’s calculations or data validation.  ### Main Message - **Transparency in cost**: Users can see exactly how each component contributes to the total price. - **Flexibility**: The component list allows users to tailor the build to their performance needs or budget constraints. - **Data integrity**: The numeric sequences suggest that the spreadsheet uses structured references to maintain consistency across calculations.  ### Supporting Details - All prices are listed in Vietnamese đồng (₫). - Quantities are specified for each item (e.g., 2 × 32 GB RAM modules). - The total cost is calculated automatically based on the unit prices and quantities.  ### Side Effects / Expected Inputs - **No explicit side effects** are noted; the file is purely informational. - **Expected inputs**: Users may need to adjust quantities or replace items from the component list to reflect their own build choices. The spreadsheet likely recalculates the total cost automatically when such changes are made.  ---  **Bottom line:**   The file is a practical tool for anyone planning to assemble a PC, offering a ready‑made cost estimate and a flexible set of component options. It is organized in Vietnamese, with clear sections for pricing, component alternatives, and underlying data references that support accurate calculations.&quot;}]</pre>
+</div>
+</div>
+<div class="card mt-4">
+<div class="card-header">
+<strong>Entries (Markdown)</strong>
+</div>
+<div class="card-body bg-black text-white font-monospace">
+<pre class="mb-0">Path: ./
+Type: folder
+Size: 
+Summary: Contains 2 subfolders
+
+Path: ./pptx
+Type: folder
+Size: 
+Summary: Contains 1 subfolder
+
+Path: ./pptx/1
+Type: folder
+Size: 
+Summary: Contains 1 subfolder
+
+Path: ./pptx/1/2
+Type: folder
+Size: 
+Summary: Contains 1 subfolder
+
+Path: ./pptx/1/2/3
+Type: folder
+Size: 
+Summary: Contains 1 file
+
+Path: ./pptx/1/2/3/Performance_Testing_Presentation.pptx
+Type: file
+Size: 35398
+Summary: **Summary of “Performance_Testing_Presentation.pptx” (1/27/13)**    | Section | Key Points | Supporting Details | |---------|------------|--------------------| | **Purpose** | Demonstrate how to evaluate and improve the performance of a Windows desktop application and its underlying Web Service. | • Focus on both client‑side (UI) and server‑side (API) performance. &amp;lt;br&amp;gt;• Emphasize the need for regular, repeatable tests after each release. | | **Client‑Side Performance Testing** | • Measure UI responsiveness and load times. &amp;lt;br&amp;gt;• Identify bottlenecks in the desktop app before and after switching to a Web Service. | • **Before Web Service** – load local data, profile with Visual Studio Profiler. &amp;lt;br&amp;gt;• **After Web Service** – call API to fetch settings/files, measure load time with Fiddler, logging, and profiler. &amp;lt;br&amp;gt;• Metrics: First Contentful Paint (FCP), Time to Interactive (TTI), DOM load time, JavaScript execution time. &amp;lt;br&amp;gt;• Tools: Google Lighthouse, WebPageTest, Chrome DevTools Performance panel. | | **Server‑Side Load Testing** | • Test the Web API’s ability to handle concurrent clients. &amp;lt;br&amp;gt;• Capture average response time, error rate, and throughput. | • **Tool** – Apache JMeter. &amp;lt;br&amp;gt;• **Test Plan** – Thread Group + HTTP Request sampler. &amp;lt;br&amp;gt;• **Scenario Example** – 500 requests/second for 1 minute to `/getFile`. &amp;lt;br&amp;gt;• **Results** – Avg = 780 ms, 95th = 1450 ms, Error Rate = 2 %. &amp;lt;br&amp;gt;• **Optimization Tips** – increase thread pool size, optimize I/O, enable GZIP compression. | | **Combined Approach** | • Use client‑side metrics to improve user experience. &amp;lt;br&amp;gt;• Use load‑test metrics to define system limits. | • Run both tests in parallel or sequentially to get a holistic view. &amp;lt;br&amp;gt;• Combine results to pinpoint whether UI delays are due to network/API latency or local processing. | | **Tools &amp;amp; References** | • Google Lighthouse, JMeter, GTmetrix, Visual Studio Profiler, Fiddler, WebPageTest.org. | • Official documentation links (not included in the slide but referenced). | | **Recommendations** | • Execute tests regularly, especially after code or infrastructure changes. &amp;lt;br&amp;gt;• Document baseline metrics and track deviations. &amp;lt;br&amp;gt;• Address identified bottlenecks (e.g., increase pool size, enable compression). | • Suggested to run tests in a staging environment that mirrors production. | | **Side Effects / Risks** | • High error rates may indicate server overload or network issues. &amp;lt;br&amp;gt;• Poor client‑side performance can degrade perceived UX even if server metrics are fine. | • Monitoring for spikes in latency or error counts is essential. | | **Expected Inputs for Tests** | • API endpoint URLs, authentication tokens, request payloads. &amp;lt;br&amp;gt;• Desired concurrency level (threads/users), test duration, and request rate. | • JMeter test plan configuration (Thread Group settings, HTTP Request sampler). |  **Overall Message**   The presentation argues that effective performance testing requires a dual focus: measuring the end‑user experience on the client side and quantifying the server’s capacity to handle load. By combining tools such as Lighthouse for UI metrics and JMeter for API load testing, teams can identify bottlenecks, optimize system components, and maintain a high‑quality user experience. Regular, repeatable testing after each deployment is essential to ensure that performance regressions are caught early.
+
+Path: ./sample2xlxs
+Type: folder
+Size: 
+Summary: Contains 1 file
+
+Path: ./sample2xlxs/Xay-dung-cau-hinh.xlsx
+Type: file
+Size: 12721
+Summary: **File Summary – sample2xlxs/Xay‑dung‑cau‑hinh.xlsx**  | Section | What it contains | Key details | |---------|------------------|-------------| | **Price list (Bảng báo giá chi tiết)** | A table that lists the cost of each component needed to build a PC. | • **CPU** – Intel Core Ultra 7 (265 K / Turbo up to 5.5 GHz, 20 cores/20 threads, 30 MB cache, LGA 1851) – 8 590 000 ₫ (qty 1) &amp;lt;br&amp;gt;• **Motherboard** – ASUS PRIME Z890‑P WIFI CSM (DDR5) – 7 490 000 ₫ &amp;lt;br&amp;gt;• **RAM** – Corsair Vengeance DDR5 64 GB (2 × 32 GB, 6000 MHz) – 5 490 000 ₫ (qty 2) &amp;lt;br&amp;gt;• **GPU** – (price only) 29 990 000 ₫ &amp;lt;br&amp;gt;• **SSD** – 1 TB (price 2 990 000 ₫) &amp;lt;br&amp;gt;• **PSU** – ASUS TUF Gaming 1000 W, 80 Plus Gold, full‑modular – 4 750 000 ₫ &amp;lt;br&amp;gt;• **Case** – Coolermaster MasterBox MB520 TG ARGB – 2 150 000 ₫ &amp;lt;br&amp;gt;• **Cooling** – Deepcool LT720 AIO – 2 790 000 ₫ &amp;lt;br&amp;gt;• **Total** – 69 730 000 ₫ |  | Section | What it contains | Key details | |---------|------------------|-------------| | **Component list** | A flat list of alternative parts that can be mixed and matched for different builds. | • **CPU** – Intel i5‑14600KF, Intel Xeon E5‑2680 v4 (14 core/28 threads) &amp;lt;br&amp;gt;• **Motherboards** – MSI MPG B760M EDGE TI WIFI, ASUS PRIME Z890‑P, GIGABYTE GP‑AG4500G, MSI A750GF, Huanazhi X99 F8D Plus &amp;lt;br&amp;gt;• **RAM** – Corsair Dominator Platinum RGB 64 GB 5200 MHz, ECC DDR4 15 GB 2400, Galax 1060 6 GB &amp;lt;br&amp;gt;• **GPU** – MSI RTX 3070 Ti Gaming X Trio, ZOTAC GeForce RTX 4070 Ti SUPER Trinity OC, others &amp;lt;br&amp;gt;• **SSD** – Kingston NV3 1 TB M.2 PCIe Gen4 x4 NVMe, other models &amp;lt;br&amp;gt;• **PSU** – MIK SPOWER 650 W, other units &amp;lt;br&amp;gt;• **Cooling** – MAG CORELIQUID 240R V2, other AIO units |  | Section | What it contains | Key details | |---------|------------------|-------------| | **Numeric sequences** | A series of numbers that appear to be cell coordinates or data mapping references. | • Example: “0 1 2 3 4 5 6 7 8 9 8 10 11 12 9 12 13 14 15 16 17 18 42 19 9 19 20 41 21 9 21 23 24 25 9 25 26 27 28 9 28 29 30 31 9 31 22 32 33” &amp;lt;br&amp;gt;• These likely correspond to row/column indices used in the spreadsheet’s formulas or data validation rules. |  ---  ### Purpose of the File The spreadsheet serves as a **configuration guide and cost calculator** for building personal computers. It provides:  1. **A detailed price breakdown** for a reference build (CPU, motherboard, RAM, GPU, SSD, PSU, case, cooling). 2. **A catalog of alternative components** that can be swapped in to create different builds (e.g., higher‑end GPUs, different CPUs, varied RAM capacities). 3. **Underlying data references** (numeric sequences) that support the spreadsheet’s calculations or data validation.  ### Main Message - **Transparency in cost**: Users can see exactly how each component contributes to the total price. - **Flexibility**: The component list allows users to tailor the build to their performance needs or budget constraints. - **Data integrity**: The numeric sequences suggest that the spreadsheet uses structured references to maintain consistency across calculations.  ### Supporting Details - All prices are listed in Vietnamese đồng (₫). - Quantities are specified for each item (e.g., 2 × 32 GB RAM modules). - The total cost is calculated automatically based on the unit prices and quantities.  ### Side Effects / Expected Inputs - **No explicit side effects** are noted; the file is purely informational. - **Expected inputs**: Users may need to adjust quantities or replace items from the component list to reflect their own build choices. The spreadsheet likely recalculates the total cost automatically when such changes are made.  ---  **Bottom line:**   The file is a practical tool for anyone planning to assemble a PC, offering a ready‑made cost estimate and a flexible set of component options. It is organized in Vietnamese, with clear sections for pricing, component alternatives, and underlying data references that support accurate calculations.</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+<script>
+(function(){
+  const filterInput = document.getElementById('path-filter-input');
+  const tableRows = document.querySelectorAll('#entries-table tbody tr');
+  if (!filterInput) return;
+  filterInput.addEventListener('input', () => {
+    const term = filterInput.value.trim().toLowerCase();
+    tableRows.forEach((row) => {
+      const pathCell = row.querySelector('td:first-child');
+      const text = pathCell ? pathCell.textContent?.toLowerCase() ?? '' : '';
+      row.style.display = term && !text.includes(term) ? 'none' : '';
+    });
+  });
+})();
+</script>
+</html>
