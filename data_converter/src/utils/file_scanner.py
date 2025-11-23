@@ -8,6 +8,19 @@ from typing import List, Tuple
 from config.settings import SUPPORTED_EXTENSIONS, CONVERTIBLE_EXTENSIONS, COPY_EXTENSIONS
 
 
+# Mapping of extension to postfix used when generating PDF filenames
+POSTFIX_MAP = {
+    '.txt': '_t',
+    '.md': '_t',
+    '.doc': '_d',
+    '.docx': '_d',
+    '.xls': '_x',
+    '.xlsx': '_x',
+    '.ppt': '_p',
+    '.pptx': '_p',
+}
+
+
 class FileScanner:
     """Handles file scanning operations"""
     
@@ -74,8 +87,12 @@ class FileScanner:
         # Get relative path from input directory
         relative_path = input_file.relative_to(input_dir)
         
-        # Change extension to .pdf
+        # Change extension to .pdf and add postfix when needed
         output_relative = relative_path.with_suffix('.pdf')
+        postfix = POSTFIX_MAP.get(input_file.suffix.lower())
+        if postfix:
+            new_name = f"{output_relative.stem}{postfix}{output_relative.suffix}"
+            output_relative = output_relative.with_name(new_name)
         
         # Construct full output path
         output_path = output_dir / output_relative
