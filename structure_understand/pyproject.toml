@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=65.5", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "structure-understand"
+version = "0.1.0"
+description = "Generate Markdown reports that describe a directory hierarchy and summarize its files."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+    "requests>=2.30",
+    "openai>=1.0",
+    "ollama",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+structure-understand = "structure_understand.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"structure_understand" = ["config.yaml", "*.md"]
