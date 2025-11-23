@@ -49,7 +49,7 @@ def build_summary_engine(config: dict[str, Any]) -> SummaryEngine:
     primary: Optional[BaseSummarizer] = None
     if provider == "openai":
         try:
-            from structure_understand.openai_summarizer import OpenAISummarizer
+            from .openai_summarizer import OpenAISummarizer
         except ImportError as exc:  # pragma: no cover - optional integration
             logger.warning("OpenAI summarizer unsupported: %s", exc)
         else:
@@ -59,7 +59,7 @@ def build_summary_engine(config: dict[str, Any]) -> SummaryEngine:
                 logger.warning("OpenAI summarizer unavailable: %s", exc)
     elif provider == "ollama":
         try:
-            from structure_understand.ollama_summarizer import OllamaSummarizer
+            from .ollama_summarizer import OllamaSummarizer  # type: ignore
         except ImportError as exc:  # pragma: no cover - optional integration
             logger.warning("Ollama summarizer unsupported: %s", exc)
         else:
