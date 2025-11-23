@@ -1,0 +1,16 @@
+This is a simple text file for testing the text to PDF conversion feature.
+
+The Document Converter now supports multiple file formats including:
+
+- Microsoft Office documents (DOCX, XLSX, PPTX)
+- OpenDocument formats (ODT, ODS, ODP)
+- CSV files
+- Text files (TXT, MD, RTF)
+- HTML files
+- And more!
+
+Files that are already in PDF format or image files will be copied directly to the output folder, maintaining the same folder structure.
+
+This makes it easy to process entire directories of mixed file types.
+
+Thank you for using Document Converter v2.1!

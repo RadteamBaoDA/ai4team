@@ -1,20 +1,50 @@
 # You can adjust these values without touching Python code.
-input_root: ../input  # relative to this folder; absolute path also allowed
-output_file: structure_summary.md  # relative to this folder
-# How much of each file to read when preparing summaries (bytes).
-max_file_bytes: 20000
+input_root: ./input # relative to this folder; absolute path also allowed
+output_file: structure_summary.md # relative to this folder
+# How much of each file to read when preparing summaries (bytes); set to null to read the entire file.
+max_file_bytes: null
 # How long each summary should be when left to placeholder logic.
-max_summary_chars: 300
-# How much text to send to an LLM when using OpenAI or Ollama.
-max_prompt_chars: 4000
+max_summary_chars: 150
+# How much text to send to an LLM when using OpenAI or Ollama; null sends the whole file.
+max_prompt_chars: null
 # Skip folders that tend to contain auto-generated or binary artifacts.
 exclude_paths:
   - __pycache__
   - .git
   - logs
   - node_modules
+# File extensions that should be sent to the LLM summarizer. Leave empty to allow all.
+summary_extensions:
+  [
+    "docx",
+    "mdx",
+    "pptx",
+    "pdf",
+    "xlsx",
+    "md",
+    "py",
+    "js",
+    "ts",
+    "java",
+    "go",
+    "rs",
+    "cpp",
+    "c",
+    "cs",
+    "html",
+    "css",
+    "json",
+    "yaml",
+    "yml",
+    "xml",
+  ]
+# Which summarizer to run. Leave empty to use the built-in default (ollama).
+summary_type: ollama
+# HTML output preserves the clickable/expandable view.
+html_output_file: structure_summary.html
+# How many worker threads should process summaries concurrently. Defaults to the number of CPUs.
+summary_workers: 1
 summarizer:
-  provider: placeholder  # options: placeholder, openai, ollama
   placeholder:
     max_chars: 350
   openai:
@@ -24,19 +54,14 @@ summarizer:
     base_url: https://api.openai.com
     model: gpt-4o-mini
     temperature: 0.2
-    max_tokens: 200
     # system message guides the assistant's tone and focus.
     system_message: |
-      You are a helpful assistant summarizing files for humans. Highlight each file's purpose and structure.
+      You are a helpful assistant summarizing files for humans. Highlight file content, purpose, and structure.
   ollama:
     host: http://localhost:11434
     # legacy key; url will still be consumed but prefer host
     # url: http://localhost:11434/api/prompt
-    model: ggml-gpt4o-mini
+    model: gpt-oss:latest
     temperature: 0.2
-    max_tokens: 200
     system_message: |
-      You are summarizing code for humans with focus on structure and intent.
-
-# How many worker threads should process summaries concurrently. Defaults to the number of CPUs.
-summary_workers: 4
+      You are a helpful assistant summarizing files for humans. Highlight file content, purpose, and structure.

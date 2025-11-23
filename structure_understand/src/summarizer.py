@@ -30,6 +30,8 @@ class SummaryEngine:
         self.fallback = fallback
 
     def summarize(self, rel_path: str, preview_text: str) -> str:
+        provider_name = type(self.primary).__name__ if self.primary else "placeholder"
+        logger.info("Invoking %s summarizer for %s", provider_name, rel_path)
         if self.primary:
             try:
                 text = self.primary.summarize(rel_path, preview_text)
@@ -37,6 +39,7 @@ class SummaryEngine:
                     return text
             except Exception as exc:  # pragma: no cover - best effort
                 logger.warning("LLM summarization failed for %s: %s", rel_path, exc)
+        logger.info("Falling back to placeholder summarizer for %s", rel_path)
         return self.fallback.summarize(rel_path, preview_text)
 
 

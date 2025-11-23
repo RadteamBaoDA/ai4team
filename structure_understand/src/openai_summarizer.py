@@ -24,7 +24,6 @@ class OpenAISummarizer(BaseSummarizer):
         self.client = OpenAI(api_key=api_key, **client_kwargs)
         self.model = config.get("model", "gpt-4o-mini")
         self.temperature = float(config.get("temperature", 0.2))
-        self.max_tokens = int(config.get("max_tokens", 200))
         self.system_message = config.get(
             "system_message", "Summarize code files for humans."
         )
@@ -41,7 +40,6 @@ class OpenAISummarizer(BaseSummarizer):
                 {"role": "user", "content": prompt},
             ],
             temperature=self.temperature,
-            max_tokens=self.max_tokens,
         )
         try:
             return response.choices[0].message.content.strip()

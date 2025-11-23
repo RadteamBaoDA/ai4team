@@ -16,12 +16,11 @@ class OllamaSummarizer(BaseSummarizer):
         self.client = Client(host=host)
         self.model = config.get("model", "llama3-70b")
         self.temperature = float(config.get("temperature", 0.2))
-        self.num_predict = int(config.get("max_tokens", 200))
         self.system_message = config.get("system_message", "Summarize code files for humans.")
 
     def summarize(self, rel_path: str, preview_text: str) -> str:
         prompt = (
-            f"Summarize the intent and structure of {rel_path}."
+            f"Could you please provide a summary of the {rel_path}, including all key points and supporting details? The summary should be comprehensive and accurately reflect the main message and arguments presented in the original text, while also being concise and easy to understand. To ensure accuracy, please read the text carefully and pay attention to any nuances or complexities in the language. Additionally, the summary should avoid any personal biases or interpretations and remain objective and factual throughout."
             f" Include any obvious side effects or expected inputs.\n\n{preview_text}"
         )
         response = self.client.chat(
@@ -38,7 +37,4 @@ class OllamaSummarizer(BaseSummarizer):
             raise RuntimeError("unexpected response from Ollama") from exc
 
     def _build_options(self) -> dict[str, Any]:
-        options: dict[str, Any] = {"temperature": self.temperature}
-        if self.num_predict is not None:
-            options["num_predict"] = self.num_predict
-        return options
+        return {"temperature": self.temperature}

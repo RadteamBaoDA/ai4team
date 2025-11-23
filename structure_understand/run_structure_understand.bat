@@ -12,4 +12,4 @@ if defined PYTHON_EXE (
 ) else (
   set "PY_CMD=python"
 )
-"%PY_CMD%" -m structure_understand.cli --config "%CONFIG%"
+"%PY_CMD%" "%~dp0app.py" --config "%CONFIG%"

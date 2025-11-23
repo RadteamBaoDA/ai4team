@@ -7,6 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .summarizer import build_summary_engine
 from .traversal import build_markdown, collect_structure
+from .html_report import build_html_report
 
 logger = logging.getLogger(__name__)
 
@@ -30,3 +31,7 @@ def main() -> None:
     config.output_file.parent.mkdir(parents=True, exist_ok=True)
     config.output_file.write_text(markdown, encoding="utf-8")
     logger.info("Structure report saved to %s", config.output_file)
+    html = build_html_report(entries, config.input_root, config.config_path)
+    config.html_output_file.parent.mkdir(parents=True, exist_ok=True)
+    config.html_output_file.write_text(html, encoding="utf-8")
+    logger.info("Interactive HTML report saved to %s", config.html_output_file)

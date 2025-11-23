@@ -32,3 +32,18 @@ def test_load_config_resolves_relative_paths(tmp_path):
     assert config.max_prompt_chars == 400
     assert config.summarizer_settings["provider"] == "placeholder"
     assert config.config_path == config_file.resolve()
+
+
+def test_summary_type_defaults_to_ollama(tmp_path):
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        textwrap.dedent("""
+        input_root: ./input_root
+        output_file: ./report.md
+        summary_type: ollama
+        """)
+    )
+
+    config = load_config(config_file)
+
+    assert config.summarizer_settings["provider"] == "ollama"
