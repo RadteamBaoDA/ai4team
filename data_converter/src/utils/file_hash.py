@@ -7,6 +7,8 @@ from pathlib import Path
 # Optimised chunk size for better performance (64KB)
 CHUNK_SIZE = 65_536
 
+from .hash_cache import get_hash_cache as _get_hash_cache
+
 
 @lru_cache(maxsize=128)
 def _calculate_file_hash_cached(
@@ -60,7 +62,6 @@ def calculate_file_hash(file_path: Path, algorithm: str = "md5", use_persistent_
     # Try persistent cache first (v2.5 feature)
     if use_persistent_cache:
         try:
-            from .hash_cache import get_hash_cache
             cache = get_hash_cache()
             cached_hash = cache.get(path_obj, file_size, modified_ns, algorithm)
             if cached_hash:
@@ -80,7 +81,6 @@ def calculate_file_hash(file_path: Path, algorithm: str = "md5", use_persistent_
     # Store in persistent cache
     if use_persistent_cache and hash_value:
         try:
-            from .hash_cache import get_hash_cache
             cache = get_hash_cache()
             cache.set(path_obj, file_size, modified_ns, hash_value, algorithm)
         except Exception:
@@ -88,6 +88,11 @@ def calculate_file_hash(file_path: Path, algorithm: str = "md5", use_persistent_
             pass
     
     return hash_value
+
+
+def get_hash_cache():
+    """Helper to expose the persistent hash cache singleton."""
+    return _get_hash_cache()
 
 
 # Expose cache helpers for compatibility with existing diagnostics/tests.

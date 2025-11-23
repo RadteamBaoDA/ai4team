@@ -25,8 +25,7 @@ class HashCache:
     
     def _init_db(self):
         """Initialize database schema"""
-        conn = sqlite3.connect(self.db_path)
-        try:
+        with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS file_hashes (
                     file_path TEXT PRIMARY KEY,
@@ -43,13 +42,10 @@ class HashCache:
                 ON file_hashes(file_path)
             """)
             conn.commit()
-        finally:
-            conn.close()
     
     def get(self, file_path: Path, file_size: int, modified_ns: int, algorithm: str = 'md5') -> Optional[str]:
         """Get cached hash if file hasn't changed"""
-        conn = sqlite3.connect(self.db_path)
-        try:
+        with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
                 SELECT hash_value FROM file_hashes
                 WHERE file_path = ? 
@@ -57,16 +53,12 @@ class HashCache:
                 AND modified_time = ?
                 AND algorithm = ?
             """, (str(file_path.resolve()), file_size, modified_ns, algorithm))
-            
             row = cursor.fetchone()
             return row[0] if row else None
-        finally:
-            conn.close()
     
     def set(self, file_path: Path, file_size: int, modified_ns: int, hash_value: str, algorithm: str = 'md5'):
         """Store hash in cache"""
-        conn = sqlite3.connect(self.db_path)
-        try:
+        with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO file_hashes 
                 (file_path, file_size, modified_time, hash_value, algorithm, cached_at)
@@ -80,13 +72,10 @@ class HashCache:
                 datetime.now().isoformat()
             ))
             conn.commit()
-        finally:
-            conn.close()
     
     def clear_old_entries(self, days: int = 30):
         """Remove cache entries older than specified days"""
-        conn = sqlite3.connect(self.db_path)
-        try:
+        with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 DELETE FROM file_hashes
                 WHERE datetime(cached_at) < datetime('now', '-' || ? || ' days')
@@ -95,13 +84,10 @@ class HashCache:
             
             # Vacuum to reclaim space
             conn.execute("VACUUM")
-        finally:
-            conn.close()
     
     def get_stats(self) -> dict:
         """Get cache statistics"""
-        conn = sqlite3.connect(self.db_path)
-        try:
+        with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM file_hashes")
             count = cursor.fetchone()[0]
             
@@ -118,8 +104,6 @@ class HashCache:
                 'oldest_entry': oldest,
                 'newest_entry': newest
             }
-        finally:
-            conn.close()
 
 
 # Global cache instance

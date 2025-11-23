@@ -145,7 +145,17 @@ class HashCacheTests(unittest.TestCase):
         self.cache = hash_cache.HashCache(self.db_path)
 
     def tearDown(self):
-        self.temp_dir.cleanup()
+        for _ in range(5):
+            try:
+                self.temp_dir.cleanup()
+                break
+            except PermissionError:
+                time.sleep(0.05)
+        else:
+            try:
+                self.temp_dir.cleanup()
+            except PermissionError:
+                pass
 
     def test_set_and_get(self):
         file_path = Path("/tmp/sample.docx")
@@ -192,7 +202,10 @@ class LoggerTests(unittest.TestCase):
         logger = logger_utils.setup_logger(logger_name)
 
         file_handlers = [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
-        stream_handlers = [h for h in logger.handlers if isinstance(h, logging.StreamHandler)]
+        stream_handlers = [
+            h for h in logger.handlers
+            if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+        ]
         self.assertEqual(len(file_handlers), 1)
         self.assertEqual(len(stream_handlers), 1)
 

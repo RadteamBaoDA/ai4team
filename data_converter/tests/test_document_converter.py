@@ -21,6 +21,7 @@ class DocumentConverterTests(unittest.TestCase):
         self.scanner_patcher = mock.patch("src.document_converter.FileScanner")
         self.mock_scanner_cls = self.scanner_patcher.start()
         self.mock_scanner = self.mock_scanner_cls.return_value
+        # Provide a deterministic default path while allowing per-test overrides.
         self.mock_scanner.get_output_path.side_effect = (
             lambda input_file, *_: self.output_dir / f"{input_file.stem}.pdf"
         )
@@ -50,6 +51,7 @@ class DocumentConverterTests(unittest.TestCase):
 
     def test_get_output_path_delegates_to_scanner(self):
         target = self.output_dir / "custom.pdf"
+        self.mock_scanner.get_output_path.side_effect = None
         self.mock_scanner.get_output_path.return_value = target
         doc = self.input_dir / "file.docx"
         path = self.converter.get_output_path(doc)
@@ -59,6 +61,7 @@ class DocumentConverterTests(unittest.TestCase):
     def test_convert_file_skips_when_up_to_date(self):
         doc = self.input_dir / "skip.docx"
         doc.write_text("content")
+        self.mock_scanner.get_output_path.side_effect = None
         self.mock_scanner.get_output_path.return_value = self.output_dir / "skip.pdf"
 
         with mock.patch("src.document_converter.should_skip_conversion", return_value=True):
@@ -105,6 +108,7 @@ class DocumentConverterTests(unittest.TestCase):
         doc = self.input_dir / "copy2.txt"
         doc.write_text("data")
         target = self.output_dir / "copy2.txt"
+        self.mock_scanner.get_output_path.side_effect = None
         self.mock_scanner.get_output_path.return_value = target.with_suffix(".pdf")
 
         with mock.patch("src.document_converter.should_skip_copy", return_value=False), \
