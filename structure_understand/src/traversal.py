@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
@@ -59,33 +60,37 @@ def _describe_folder(file_count: int, dir_count: int) -> str:
 
 def collect_structure(config: StructureConfig, summarizer: SummaryEngine) -> List[StructureEntry]:
     entries: List[StructureEntry] = []
-    for dirpath, dirnames, filenames in os.walk(config.input_root, topdown=True):
-        current = Path(dirpath)
-        rel_dir = current.relative_to(config.input_root) if current != config.input_root else Path(".")
-        dirnames[:] = [d for d in sorted(dirnames) if not _is_excluded(rel_dir / d, config.exclude_paths)]
-        filtered_files = [f for f in sorted(filenames) if not _is_excluded(rel_dir / f, config.exclude_paths)]
-        entries.append(
-            StructureEntry(
-                relative_path=rel_dir,
-                kind="folder",
-                size=None,
-                summary=_describe_folder(len(filtered_files), len(dirnames)),
-            )
-        )
-        for filename in filtered_files:
-            file_path = current / filename
-            rel_file = rel_dir / filename
-            preview = _read_preview(file_path, config.max_file_bytes)
-            trimmed = preview[: config.max_prompt_chars]
-            summary = summarizer.summarize(rel_file.as_posix(), trimmed)
+    file_tasks: List[tuple[StructureEntry, Future[str]]] = []
+    with ThreadPoolExecutor(max_workers=config.summary_workers) as executor:
+        for dirpath, dirnames, filenames in os.walk(config.input_root, topdown=True):
+            current = Path(dirpath)
+            rel_dir = current.relative_to(config.input_root) if current != config.input_root else Path(".")
+            dirnames[:] = [d for d in sorted(dirnames) if not _is_excluded(rel_dir / d, config.exclude_paths)]
+            filtered_files = [f for f in sorted(filenames) if not _is_excluded(rel_dir / f, config.exclude_paths)]
             entries.append(
                 StructureEntry(
+                    relative_path=rel_dir,
+                    kind="folder",
+                    size=None,
+                    summary=_describe_folder(len(filtered_files), len(dirnames)),
+                )
+            )
+            for filename in filtered_files:
+                file_path = current / filename
+                rel_file = rel_dir / filename
+                preview = _read_preview(file_path, config.max_file_bytes)
+                trimmed = preview[: config.max_prompt_chars]
+                entry = StructureEntry(
                     relative_path=rel_file,
                     kind="file",
                     size=_safe_stat(file_path),
-                    summary=summary,
+                    summary="",
                 )
-            )
+                entries.append(entry)
+                task = executor.submit(summarizer.summarize, rel_file.as_posix(), trimmed)
+                file_tasks.append((entry, task))
+    for entry, future in file_tasks:
+        entry.summary = future.result()
     return entries
 
 

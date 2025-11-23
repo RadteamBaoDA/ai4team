@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ class StructureConfig:
     max_prompt_chars: int
     summarizer_settings: dict[str, Any]
     config_path: Path
+    summary_workers: int
 
 
 def _resolve_path(base: Path, raw_value: Any) -> Path:
@@ -37,6 +39,9 @@ def load_config(path: Path) -> StructureConfig:
     max_file_bytes = int(raw.get("max_file_bytes", 20000))
     max_prompt_chars = int(raw.get("max_prompt_chars", max_file_bytes))
     summarizer_settings = raw.get("summarizer", {}) or {}
+    default_workers = os.cpu_count() or 4
+    requested_workers = raw.get("summary_workers")
+    summary_workers = max(1, int(requested_workers)) if requested_workers is not None else default_workers
     return StructureConfig(
         input_root=input_root,
         output_file=output_file,
@@ -45,4 +50,5 @@ def load_config(path: Path) -> StructureConfig:
         max_prompt_chars=max_prompt_chars,
         summarizer_settings=summarizer_settings,
         config_path=path.resolve(),
+        summary_workers=summary_workers,
     )

@@ -17,6 +17,7 @@ Edit `structure_understand/config.yaml` to control the scan and summarizer behav
   - `openai.api_key_env` names the environment variable containing your key (default `OPENAI_API_KEY`).
   - For Ollama, point `ollama.url` at a running service (`http://localhost:11434/api/prompt` by default).
   - Swap providers or tweak the nested config without touching Python code.
+- `summary_workers`: number of parallel worker threads that run summarization tasks, which defaults to the host CPU count; increase it for larger codebases to keep LLM requests in flight.
 
 ## Running
 ```bash

@@ -16,6 +16,7 @@ def _build_config(tmp_path: Path) -> StructureConfig:
         max_prompt_chars=50,
         summarizer_settings={"provider": "placeholder"},
         config_path=tmp_path / "config.yaml",
+        summary_workers=2,
     )
 
 

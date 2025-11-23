@@ -37,3 +37,6 @@ summarizer:
     max_tokens: 200
     system_message: |
       You are summarizing code for humans with focus on structure and intent.
+
+# How many worker threads should process summaries concurrently. Defaults to the number of CPUs.
+summary_workers: 4
