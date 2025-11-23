@@ -137,6 +137,9 @@ class LLMGuardManager:
         self.input_scanners = []
         self.output_scanners = []
         self.vault = None
+        self._token_encoder = None
+        self._token_encoder_failed = False
+        self._token_encoding_name = os.environ.get('LLM_GUARD_TOKEN_ENCODING', 'cl100k_base')
         
         if not HAS_LLM_GUARD:
             logger.warning('LLM Guard not installed; guard features disabled')
@@ -197,6 +200,34 @@ class LLMGuardManager:
         if use_local:
             logger.info('Local models enabled via LLM_GUARD_USE_LOCAL_MODELS environment variable')
         return use_local
+
+    def _ensure_token_encoder(self):
+        if self._token_encoder_failed:
+            return None
+        if self._token_encoder is not None:
+            return self._token_encoder
+        try:
+            import tiktoken
+            self._token_encoder = tiktoken.get_encoding(self._token_encoding_name)
+            logger.debug('Initialized tiktoken encoder %s for token counting', self._token_encoding_name)
+            return self._token_encoder
+        except Exception as exc:
+            self._token_encoder_failed = True
+            logger.debug('Unable to initialize tiktoken encoder %s: %s', self._token_encoding_name, exc)
+            return None
+
+    def _count_tokens(self, text: str) -> Optional[int]:
+        if not text:
+            return 0
+        encoder = self._ensure_token_encoder()
+        if encoder is None:
+            return None
+        try:
+            return len(encoder.encode(text))
+        except Exception as exc:
+            self._token_encoder_failed = True
+            logger.debug('Token counting failed, disabling encoder: %s', exc)
+            return None
     
     def _initialize_all(self):
         """Initialize all scanners (used when lazy_init is False)."""
@@ -454,7 +485,8 @@ class LLMGuardManager:
             # Convert results to expected format
             scan_results = {}
             for scanner_name, is_valid in results_valid.items():
-                risk_score = results_score.get(scanner_name, 0.0)
+                raw_score = results_score.get(scanner_name, 0.0)
+                risk_score = max(0.0, min(raw_score, 1.0)) * 100
                 scan_results[scanner_name] = {
                     'passed': is_valid,
                     'risk_score': risk_score,
@@ -462,7 +494,7 @@ class LLMGuardManager:
                 }
                 
                 if not is_valid:
-                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score}')
+                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score:.2f}%')
             
             all_valid = all(results_valid.values())
             return sanitized_prompt, all_valid, scan_results
@@ -476,7 +508,7 @@ class LLMGuardManager:
         Run all output scanners on the text using scan_output function.
         
         Uses the official scan_output method from llm-guard library (similar to scan_prompt).
-        Output scanners require both prompt and output text.
+        For performance, only the assistant output is scanned; the prompt argument is ignored.
         Returns (sanitized_text, is_valid, scan_results)
         """
         if not self.output_scanners or not scan_output:
@@ -488,7 +520,7 @@ class LLMGuardManager:
             sanitized_output, results_valid, results_score = await asyncio.to_thread(
                 scan_output,
                 self.output_scanners,
-                prompt,
+                "",  # Skip prompt to minimize token usage during output scans
                 text,
                 self.scan_fail_fast
             )
@@ -496,7 +528,8 @@ class LLMGuardManager:
             # Convert results to expected format
             scan_results = {}
             for scanner_name, is_valid in results_valid.items():
-                risk_score = results_score.get(scanner_name, 0.0)
+                raw_score = results_score.get(scanner_name, 0.0)
+                risk_score = max(0.0, min(raw_score, 1.0)) * 100
                 scan_results[scanner_name] = {
                     'passed': is_valid,
                     'risk_score': risk_score,
@@ -504,7 +537,7 @@ class LLMGuardManager:
                 }
                 
                 if not is_valid:
-                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score}')
+                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score:.2f}%')
             
             all_valid = all(results_valid.values())
             return sanitized_output, all_valid, scan_results
@@ -525,6 +558,14 @@ class LLMGuardManager:
                 'error': str - Error message if block_on_error is True and scan failed
             }
         """
+        prompt_length = len(prompt) if isinstance(prompt, str) else 0
+        if logger.isEnabledFor(logging.DEBUG):
+            token_count = self._count_tokens(prompt)
+            if token_count is not None:
+                logger.debug('LLM Guard input scan: tokens=%d chars=%d', token_count, prompt_length)
+            else:
+                logger.debug('LLM Guard input scan: chars=%d (token count unavailable)', prompt_length)
+        
         # Lazy initialization
         if self.lazy_init:
             self._ensure_input_scanners_initialized()
@@ -539,6 +580,13 @@ class LLMGuardManager:
         
         try:
             sanitized_prompt, is_valid, scan_results = await self._run_input_scanners(prompt)
+            if logger.isEnabledFor(logging.DEBUG) and sanitized_prompt is not None and isinstance(sanitized_prompt, str):
+                sanitized_length = len(sanitized_prompt)
+                token_count = self._count_tokens(sanitized_prompt)
+                if token_count is not None:
+                    logger.debug('LLM Guard sanitized input: tokens=%d chars=%d', token_count, sanitized_length)
+                else:
+                    logger.debug('LLM Guard sanitized input: chars=%d (token count unavailable)', sanitized_length)
             
             return {
                 "allowed": is_valid,
@@ -579,7 +627,10 @@ class LLMGuardManager:
                 'error': str - Error message if block_on_error is True and scan failed
             }
         """
+        
+        logger.debug("LLM Guard output scan request: prompt length=%d, text length=%d", len(prompt), len(text))
         # Lazy initialization
+       
         if self.lazy_init:
             self._ensure_output_scanners_initialized()
         

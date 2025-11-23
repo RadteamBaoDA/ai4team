@@ -178,6 +178,8 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager):
         except Exception as exc:
             logger.error("Invalid OpenAI request JSON: %s", exc)
             raise HTTPException(status_code=400, detail={"error": "invalid_json", "message": str(exc)})
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Incoming /v1/chat/completions payload: %s", payload)
 
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail={"error": "invalid_payload", "message": "Expected JSON object."})
@@ -196,7 +198,7 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager):
         # Generate request ID
         request_id = f"oai-chat-{uuid.uuid4().hex[:8]}"
         
-        prompt_text = combine_messages_text(messages)
+        prompt_text = combine_messages_text(messages, roles=('user',), latest_only=True)
         detected_lang = LanguageDetector.detect_language(prompt_text)
 
         # Define processing coroutine
@@ -417,6 +419,8 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager):
         except Exception as exc:
             logger.error("Invalid OpenAI completion JSON: %s", exc)
             raise HTTPException(status_code=400, detail={"error": "invalid_json", "message": str(exc)})
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Incoming /v1/completions payload: %s", payload)
 
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail={"error": "invalid_payload", "message": "Expected JSON object."})
@@ -621,6 +625,8 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager):
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail={"error": "invalid_json"})
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Incoming /v1/embeddings payload: %s", payload)
 
         resp, err = await forward_request(config, '/v1/embeddings', payload=payload, stream=False, timeout=30)
         if err:
@@ -639,6 +645,8 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager):
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail={"error": "invalid_json"})
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Incoming /v1/models payload: %s", payload)
 
         resp, err = await forward_request(config, '/v1/models', payload=payload, stream=False, timeout=30)
         if err:

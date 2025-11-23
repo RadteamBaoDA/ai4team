@@ -22,6 +22,7 @@ from ..utils import (
     extract_model_from_payload,
     extract_text_from_payload,
     extract_text_from_response,
+    combine_messages_text,
     inline_guard_errors_enabled,
     extract_failed_scanners,
     format_markdown_error,
@@ -114,6 +115,8 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager):
         # Extract model and prompt
         model_name = extract_model_from_payload(payload)
         prompt = extract_text_from_payload(payload)
+        logger.debug("Incoming /api/generate request: model=%s, prompt length=%d, prompt=%s", model_name, len(prompt) if prompt else 0, prompt)
+
         detected_lang = LanguageDetector.detect_language(prompt)
         inline_guard = inline_guard_errors_enabled(config)
         is_stream = bool(payload.get('stream') if isinstance(payload, dict) else False)
@@ -274,13 +277,11 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager):
         # Extract model and prompt
         model_name = extract_model_from_payload(payload)
         request_id = f"chat-{uuid.uuid4().hex[:8]}"
-        
-        # Extract prompt from messages
-        prompt = ""
-        if 'messages' in payload and isinstance(payload['messages'], list):
-            for msg in payload['messages']:
-                if isinstance(msg, dict) and 'content' in msg:
-                    prompt += msg['content'] + "\n"
+
+        messages = payload.get('messages') if isinstance(payload, dict) else []
+        prompt = combine_messages_text(messages, roles=('user',), latest_only=True)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Incoming /api/chat request payload: %s", payload)
         
         # Detect language from prompt
         detected_lang = LanguageDetector.detect_language(prompt)

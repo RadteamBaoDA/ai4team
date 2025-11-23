@@ -53,6 +53,14 @@ def inline_guard_errors_enabled(config: Any, default: bool = True) -> bool:
     return result
 
 
+def _format_score_percent(score: Any) -> str:
+    if isinstance(score, (int, float)):
+        percent = score if score > 1 else score * 100
+        percent = max(0.0, min(percent, 100.0))
+        return f"{percent:.1f}%"
+    return str(score) if score is not None else "-"
+
+
 def extract_failed_scanners(scan_result: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract normalized scanner failure details from scan results."""
     if not isinstance(scan_result, dict):
@@ -63,15 +71,27 @@ def extract_failed_scanners(scan_result: Dict[str, Any]) -> List[Dict[str, Any]]
     scanners_obj = scan_result.get("scanners", {})
     scanners: Dict[str, Any] = scanners_obj if isinstance(scanners_obj, dict) else {}
     for scanner_name, info in scanners.items():
-        if info and not info.get("passed", True):
-            failed.append(
-                {
-                    "scanner": scanner_name,
-                    "reason": info.get("reason", "Content policy violation"),
-                    "score": info.get("score"),
-                    "remediation": info.get("remediation"),
-                }
-            )
+        if not info or info.get("passed", True):
+            continue
+
+        score = info.get("score")
+        if score is None:
+            score = info.get("risk_score")
+
+        reason = (
+            info.get("reason")
+            or info.get("message")
+            or "Content policy violation"
+        )
+
+        failed.append(
+            {
+                "scanner": scanner_name,
+                "reason": reason,
+                "score": score,
+                "remediation": info.get("remediation"),
+            }
+        )
     return failed
 
 
@@ -83,13 +103,9 @@ def format_markdown_error(title: str, description: str, failed_scanners: Sequenc
 
     if failed_scanners:
         lines.append("")
-        lines.extend(["| Scanner | Reason | Score |", "| --- | --- | --- |"])
+        lines.extend(["| Scanner | Reason | Score (%) |", "| --- | --- | --- |"])
         for item in failed_scanners:
-            score = item.get("score")
-            if isinstance(score, (int, float)):
-                score_text = f"{score:.3f}"
-            else:
-                score_text = str(score) if score is not None else "-"
+            score_text = _format_score_percent(item.get("score"))
             lines.append(
                 f"| {item.get('scanner', '-') } | {item.get('reason', '-') } | {score_text} |"
             )

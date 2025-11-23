@@ -8,7 +8,8 @@ Contains helper functions for request/response processing:
 - OpenAI to Ollama parameter mapping
 """
 
-from typing import Dict, Any, List
+import logging
+from typing import Dict, Any, Iterable, List, Optional
 
 
 def extract_client_ip(request) -> str:
@@ -62,15 +63,49 @@ def extract_text_from_response(data: Any) -> str:
     return str(data)
 
 
-def combine_messages_text(messages: List[Dict[str, Any]]) -> str:
-    """Combine message contents into a single string for guard scanning."""
+def combine_messages_text(
+    messages: List[Dict[str, Any]],
+    roles: Optional[Iterable[str]] = None,
+    latest_only: bool = False,
+) -> str:
+    """Combine selected message contents into a single string for guard scanning.
+
+    Args:
+        messages: List of chat messages.
+        roles: Optional iterable of roles to include (case-insensitive).
+        latest_only: When True, return only the most recent matching message's content.
+    """
     if not isinstance(messages, list):
+        return ""
+
+    normalized_roles = None
+    if roles is not None:
+        normalized_roles = {role.lower() for role in roles}
+
+    def _matches(msg: Dict[str, Any]) -> bool:
+        if not isinstance(msg, dict):
+            return False
+        if not normalized_roles:
+            return True
+        role = str(msg.get('role', '')).lower()
+        return role in normalized_roles
+
+    if latest_only:
+        for msg in reversed(messages):
+            if not _matches(msg):
+                continue
+            content = msg.get('content')
+            if isinstance(content, str) and content.strip():
+                return content
         return ""
 
     combined: List[str] = []
     for msg in messages:
-        if isinstance(msg, dict) and isinstance(msg.get('content'), str):
-            combined.append(msg['content'])
+        if not _matches(msg):
+            continue
+        content = msg.get('content')
+        if isinstance(content, str) and content.strip():
+            combined.append(content)
     return "\n".join(combined)
 
 
@@ -112,3 +147,4 @@ def extract_prompt_from_completion_payload(payload: Dict[str, Any]) -> str:
     if isinstance(prompt, list):
         return "\n".join(str(item) for item in prompt if isinstance(item, (str, int, float)))
     return str(prompt) if prompt is not None else ""
+

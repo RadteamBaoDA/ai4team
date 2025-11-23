@@ -67,13 +67,25 @@ from .api.endpoints_openai import create_openai_endpoints
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-logger = logging.getLogger(__name__)
+def _resolve_log_level(default: str = "INFO") -> int:
+    env_level = os.environ.get("LOG_LEVEL", default)
+    print(f"Setting log level to {env_level}")
+    try:
+        return getattr(logging, env_level.upper())
+    except AttributeError:
+        return getattr(logging, default.upper(), logging.INFO)
 
-# Configure logging
+# Configure logging respecting LOG_LEVEL env (default INFO)
+_LOG_LEVEL = _resolve_log_level()
+print(f"Setting log level to {_LOG_LEVEL}")
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=_LOG_LEVEL,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True,
 )
+
+logger = logging.getLogger(__name__)
+logger.setLevel(_LOG_LEVEL)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:

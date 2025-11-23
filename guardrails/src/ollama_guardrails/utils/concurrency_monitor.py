@@ -42,6 +42,8 @@ class ConcurrencyMonitor:
             update_interval: How often to update metrics (in seconds, default: 5.0)
         """
         self.enable_debug = enable_debug
+        if self.enable_debug and not logger.isEnabledFor(logging.DEBUG):
+            logger.setLevel(logging.DEBUG)
         self.update_interval = update_interval
         self.active_tasks: Dict[str, int] = defaultdict(int)  # endpoint -> count
         self.completed_tasks: Dict[str, int] = defaultdict(int)  # endpoint -> count

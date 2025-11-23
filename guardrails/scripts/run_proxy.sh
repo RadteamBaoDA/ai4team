@@ -123,6 +123,7 @@ export_variables() {
     export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-auto}"
     export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-512}"
     export REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-300}"
+    export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 }
 
 # Function to run the uvicorn server
@@ -315,25 +316,25 @@ run_foreground() {
   while [[ $# -gt 0 ]]; do
     case $1 in
       --host)
-        HOST="$2"; shift 2
+        export HOST="$2"; shift 2
         ;;
       --port)
-        PORT="$2"; shift 2
+        export PORT="$2"; shift 2
         ;;
       --log-level)
-        LOG_LEVEL="$2"; shift 2
+        export LOG_LEVEL="$2"; shift 2
         ;;
       --reload)
-        RELOAD="true"; shift
+        export RELOAD="true"; shift
         ;;
       --debug)
-        LOG_LEVEL="debug"; DEBUG="true"; shift
+        export LOG_LEVEL="debug"; export DEBUG="true"; shift
         ;;
       --config)
-        CONFIG_FILE="$2"; shift 2
+        export CONFIG_FILE="$2"; shift 2
         ;;
       --monitor-interval)
-        MONITOR_UPDATE_INTERVAL="$2"; shift 2
+        export MONITOR_UPDATE_INTERVAL="$2"; shift 2
         ;;
       --help|-h)
         show_help
