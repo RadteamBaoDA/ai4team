@@ -1,0 +1,39 @@
+# You can adjust these values without touching Python code.
+input_root: ../input  # relative to this folder; absolute path also allowed
+output_file: structure_summary.md  # relative to this folder
+# How much of each file to read when preparing summaries (bytes).
+max_file_bytes: 20000
+# How long each summary should be when left to placeholder logic.
+max_summary_chars: 300
+# How much text to send to an LLM when using OpenAI or Ollama.
+max_prompt_chars: 4000
+# Skip folders that tend to contain auto-generated or binary artifacts.
+exclude_paths:
+  - __pycache__
+  - .git
+  - logs
+  - node_modules
+summarizer:
+  provider: placeholder  # options: placeholder, openai, ollama
+  placeholder:
+    max_chars: 350
+  openai:
+    api_key_env: OPENAI_API_KEY
+    # or provide api_key directly (less secure)
+    # api_key: your-openai-key-here
+    base_url: https://api.openai.com
+    model: gpt-4o-mini
+    temperature: 0.2
+    max_tokens: 200
+    # system message guides the assistant's tone and focus.
+    system_message: |
+      You are a helpful assistant summarizing files for humans. Highlight each file's purpose and structure.
+  ollama:
+    host: http://localhost:11434
+    # legacy key; url will still be consumed but prefer host
+    # url: http://localhost:11434/api/prompt
+    model: ggml-gpt4o-mini
+    temperature: 0.2
+    max_tokens: 200
+    system_message: |
+      You are summarizing code for humans with focus on structure and intent.
