@@ -7,17 +7,37 @@ import platform
 from pathlib import Path
 from threading import Lock
 from .base_converter import BaseConverter
-from config.settings import MS_OFFICE_PATHS, CONVERSION_TIMEOUT
+from ..utils import setup_logger
+from config.settings import (
+    MS_OFFICE_PATHS,
+    CONVERSION_TIMEOUT,
+    EXCEL_FORCE_SINGLE_PAGE,
+    EXCEL_AUTO_LANDSCAPE,
+    EXCEL_LIMIT_PRINT_AREA,
+    EXCEL_SINGLE_PAGE_THRESHOLD,
+    EXCEL_MARGIN_INCHES,
+    EXCEL_HEADER_MARGIN_INCHES,
+)
 
 
 # Global lock for PowerPoint COM automation (not thread-safe in parallel)
 _powerpoint_lock = Lock()
 
 
+# Excel COM constants (avoids importing win32com generated constants)
+XL_ORIENT_PORTRAIT = 1
+XL_ORIENT_LANDSCAPE = 2
+XL_FIND_LOOKIN_VALUES = -4163
+XL_FIND_SEARCHORDER_ROWS = 1
+XL_FIND_DIRECTION_NEXT = 1
+XL_FIND_DIRECTION_PREV = 2
+
+
 class MSOfficeConverter(BaseConverter):
     """Converts documents using Microsoft Office"""
     
     def __init__(self):
+        self.logger = setup_logger(__name__)
         self._word_path = None
         self._excel_path = None
         self._powerpoint_path = None
@@ -126,6 +146,25 @@ class MSOfficeConverter(BaseConverter):
                 excel.DisplayAlerts = False
                 
                 workbook = excel.Workbooks.Open(str(input_file.resolve()))
+                # Force worksheets to a consistent layout before exporting
+                margin = excel.Application.InchesToPoints(EXCEL_MARGIN_INCHES)
+                header_margin = excel.Application.InchesToPoints(EXCEL_HEADER_MARGIN_INCHES)
+                sheet_count = workbook.Worksheets.Count
+                for idx in range(1, sheet_count + 1):
+                    sheet = workbook.Worksheets(idx)
+                    try:
+                        self._prepare_excel_sheet(
+                            sheet,
+                            margin,
+                            header_margin,
+                        )
+                    except Exception as prep_error:
+                        # Keep conversions resilient while surfacing diagnostics for troubleshooting
+                        self.logger.debug(
+                            "Excel page setup failed for %s: %s",
+                            getattr(sheet, "Name", "<unknown>"),
+                            prep_error,
+                        )
                 workbook.ExportAsFixedFormat(0, str(output_file.resolve()))  # 0 = xlTypePDF
                 workbook.Close(SaveChanges=False)
                 workbook = None
@@ -160,6 +199,113 @@ class MSOfficeConverter(BaseConverter):
                 pythoncom.CoUninitialize()
             except:
                 pass
+
+    def _prepare_excel_sheet(self, sheet, margin_pts: float, header_margin_pts: float) -> None:
+        """Apply layout rules so PDF output is consistent and legible."""
+        bounds = self._get_sheet_bounds(sheet) if EXCEL_LIMIT_PRINT_AREA or EXCEL_FORCE_SINGLE_PAGE or EXCEL_AUTO_LANDSCAPE else None
+
+        if EXCEL_LIMIT_PRINT_AREA and bounds:
+            first_row, first_col, last_row, last_col = bounds
+            try:
+                address = sheet.Range(
+                    sheet.Cells(first_row, first_col),
+                    sheet.Cells(last_row, last_col)
+                ).Address
+                sheet.PageSetup.PrintArea = address
+            except Exception as print_error:
+                self.logger.debug(
+                    "Could not restrict print area for %s: %s",
+                    getattr(sheet, "Name", "<unknown>"),
+                    print_error,
+                )
+
+        column_count, row_count = (0, 0)
+        if bounds:
+            first_row, first_col, last_row, last_col = bounds
+            column_count = max(1, last_col - first_col + 1)
+            row_count = max(1, last_row - first_row + 1)
+
+        # Optional orientation adjustment
+        if EXCEL_AUTO_LANDSCAPE and bounds:
+            try:
+                orientation = XL_ORIENT_LANDSCAPE if column_count > row_count else XL_ORIENT_PORTRAIT
+                sheet.PageSetup.Orientation = orientation
+            except Exception as orientation_error:
+                self.logger.debug(
+                    "Orientation adjustment failed for %s: %s",
+                    getattr(sheet, "Name", "<unknown>"),
+                    orientation_error,
+                )
+
+        # Decide whether to force single page
+        should_force_single_page = EXCEL_FORCE_SINGLE_PAGE and (
+            not bounds or column_count > EXCEL_SINGLE_PAGE_THRESHOLD or row_count > EXCEL_SINGLE_PAGE_THRESHOLD
+        )
+
+        try:
+            if should_force_single_page:
+                sheet.PageSetup.Zoom = False
+                sheet.PageSetup.FitToPagesWide = 1
+                sheet.PageSetup.FitToPagesTall = 1
+            else:
+                sheet.PageSetup.Zoom = True
+        except Exception as sizing_error:
+            self.logger.debug(
+                "Scaling adjustment failed for %s: %s",
+                getattr(sheet, "Name", "<unknown>"),
+                sizing_error,
+            )
+
+        # Apply consistent margins regardless of layout logic
+        try:
+            sheet.PageSetup.LeftMargin = margin_pts
+            sheet.PageSetup.RightMargin = margin_pts
+            sheet.PageSetup.TopMargin = margin_pts
+            sheet.PageSetup.BottomMargin = margin_pts
+            sheet.PageSetup.HeaderMargin = header_margin_pts
+            sheet.PageSetup.FooterMargin = header_margin_pts
+        except Exception as margin_error:
+            self.logger.debug(
+                "Margin adjustment failed for %s: %s",
+                getattr(sheet, "Name", "<unknown>"),
+                margin_error,
+            )
+
+    def _get_sheet_bounds(self, sheet):
+        """Return the rectangle (first_row, first_col, last_row, last_col) containing real data."""
+        try:
+            cells = sheet.Cells
+            last_cell = cells.Find(
+                "*",
+                LookIn=XL_FIND_LOOKIN_VALUES,
+                SearchOrder=XL_FIND_SEARCHORDER_ROWS,
+                SearchDirection=XL_FIND_DIRECTION_PREV,
+            )
+            if not last_cell:
+                return None
+
+            first_cell = cells.Find(
+                "*",
+                LookIn=XL_FIND_LOOKIN_VALUES,
+                SearchOrder=XL_FIND_SEARCHORDER_ROWS,
+                SearchDirection=XL_FIND_DIRECTION_NEXT,
+            )
+            if not first_cell:
+                first_cell = last_cell
+
+            return (
+                int(first_cell.Row),
+                int(first_cell.Column),
+                int(last_cell.Row),
+                int(last_cell.Column),
+            )
+        except Exception as bounds_error:
+            self.logger.debug(
+                "Failed to detect data bounds for %s: %s",
+                getattr(sheet, "Name", "<unknown>"),
+                bounds_error,
+            )
+            return None
     
     def _convert_with_powerpoint(self, input_file: Path, output_file: Path) -> bool:
         """Convert PPTX using MS PowerPoint (serialized with lock for thread safety)"""

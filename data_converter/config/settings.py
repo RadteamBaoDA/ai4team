@@ -5,6 +5,33 @@ Configuration settings for Document Converter
 import os
 from pathlib import Path
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read environment variable as boolean with a tolerant parser."""
+    return os.getenv(name, str(default)).lower() in ('true', '1', 'yes')
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read environment variable as float with graceful fallback."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read environment variable as int with graceful fallback."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
 # Base directory (where main.py is located)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -14,8 +41,8 @@ DEFAULT_OUTPUT_DIR = BASE_DIR / "output"
 
 # Environment variables to control file conversion
 # Set to "false", "0", or "no" to copy files instead of converting (default: false)
-CONVERT_EXCEL_FILES = os.getenv('CONVERT_EXCEL_FILES', 'false').lower() in ('true', '1', 'yes')
-CONVERT_CSV_FILES = os.getenv('CONVERT_CSV_FILES', 'false').lower() in ('true', '1', 'yes')
+CONVERT_EXCEL_FILES = _env_bool('CONVERT_EXCEL_FILES', False)
+CONVERT_CSV_FILES = _env_bool('CONVERT_CSV_FILES', False)
 
 # Supported file extensions for conversion
 CONVERTIBLE_EXTENSIONS = {
@@ -66,6 +93,14 @@ SUPPORTED_EXTENSIONS = CONVERTIBLE_EXTENSIONS | COPY_EXTENSIONS
 
 # Conversion timeout (seconds)
 CONVERSION_TIMEOUT = 120
+
+# Excel PDF export tuning
+EXCEL_FORCE_SINGLE_PAGE = _env_bool('EXCEL_FORCE_SINGLE_PAGE', True)
+EXCEL_AUTO_LANDSCAPE = _env_bool('EXCEL_AUTO_LANDSCAPE', True)
+EXCEL_LIMIT_PRINT_AREA = _env_bool('EXCEL_LIMIT_PRINT_AREA', True)
+EXCEL_SINGLE_PAGE_THRESHOLD = _env_int('EXCEL_SINGLE_PAGE_THRESHOLD', 7)
+EXCEL_MARGIN_INCHES = _env_float('EXCEL_MARGIN_INCHES', 0.5)
+EXCEL_HEADER_MARGIN_INCHES = _env_float('EXCEL_HEADER_MARGIN_INCHES', 0.3)
 
 # LibreOffice command paths to try
 LIBREOFFICE_COMMANDS = [
