@@ -24,5 +24,3 @@ dependencies = [
 [project.scripts]
 document-converter = "main:main"
 
-[tool.uv]
-cache = true
