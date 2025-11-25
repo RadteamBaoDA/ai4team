@@ -11,6 +11,11 @@ python-pptx>=0.6.23
 
 # PDF generation and manipulation
 reportlab>=4.0.7
+pypdf>=5.1.0  # For RAG metadata injection in LibreOffice/Python converters
+
+# Optional: Advanced layout recognition (install separately if needed)
+# Uncomment to enable Docling converter for enhanced Excel/document layout analysis
+# docling>=2.63.0  # Advanced layout recognition for complex tables
 
 # For Microsoft Office 365 integration (Windows only)
 pywin32>=311; platform_system=="Windows"

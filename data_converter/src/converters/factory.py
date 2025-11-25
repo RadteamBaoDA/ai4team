@@ -7,6 +7,7 @@ from typing import List, Optional
 from .base_converter import BaseConverter
 from .libreoffice_converter import LibreOfficeConverter
 from .ms_office_converter import MSOfficeConverter
+from .docling_converter import DoclingConverter
 from .python_converters import (
     DocxConverter, 
     XlsxConverter, 
@@ -22,6 +23,7 @@ class ConverterFactory:
         # Initialize all converters
         self.libreoffice = LibreOfficeConverter()
         self.ms_office = MSOfficeConverter()
+        self.docling = DoclingConverter()
         self.docx_converter = DocxConverter()
         self.xlsx_converter = XlsxConverter()
         self.pptx_converter = PptxConverter()
@@ -43,12 +45,19 @@ class ConverterFactory:
         Returns:
             List of converters to try
         """
+        from config.settings import USE_DOCLING_CONVERTER, DOCLING_PRIORITY
+        
         ext = file_path.suffix.lower()
         converters = []
         
         office_like_ext = {'.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
                            '.odt', '.ods', '.odp', '.rtf', '.html', '.htm'}
-
+        
+        # Priority 4: Try Docling before MS Office (rarely used)
+        if USE_DOCLING_CONVERTER and DOCLING_PRIORITY >= 4 and ext in office_like_ext:
+            if self.docling.is_available():
+                converters.append(self.docling)
+        
         # Try Microsoft Office first; fall back to LibreOffice only if MS Office is unavailable
         if ext in office_like_ext:
             if self.ms_office.is_available():
@@ -56,7 +65,15 @@ class ConverterFactory:
             elif self.libreoffice.is_available():
                 converters.append(self.libreoffice)
         
-        # Add specific Python library converter as fallback
+        # Priority 3: Try Docling before LibreOffice (when MS Office unavailable)
+        if USE_DOCLING_CONVERTER and DOCLING_PRIORITY >= 3 and ext in office_like_ext:
+            if self.docling.is_available() and self.docling not in converters:
+                converters.append(self.docling)
+        
+        # Priority 2: Try Docling before Python converters (default for enhanced layout)
+        if USE_DOCLING_CONVERTER and DOCLING_PRIORITY >= 2 and ext in office_like_ext:
+            if self.docling.is_available() and self.docling not in converters:
+                converters.append(self.docling)        # Add specific Python library converter as fallback
         if ext in {'.docx', '.doc'}:
             converters.append(self.docx_converter)
         elif ext in {'.xlsx', '.xls', '.ods'}:
@@ -65,6 +82,11 @@ class ConverterFactory:
             converters.append(self.pptx_converter)
         elif ext == '.csv':
             converters.append(self.csv_converter)
+        
+        # Priority 1: Try Docling as final fallback (least priority)
+        if USE_DOCLING_CONVERTER and DOCLING_PRIORITY >= 1 and ext in office_like_ext:
+            if self.docling.is_available() and self.docling not in converters:
+                converters.append(self.docling)
         
         return converters
     
@@ -76,7 +98,8 @@ class ConverterFactory:
             Dictionary with converter availability status
         """
         return {
-            'LibreOffice': self.libreoffice.is_available(),
             'Microsoft Office': self.ms_office.is_available(),
+            'LibreOffice': self.libreoffice.is_available(),
+            'Docling (Advanced Layout)': self.docling.is_available(),
             'Python Libraries': True
         }

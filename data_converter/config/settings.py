@@ -134,6 +134,18 @@ EXCEL_TABLE_MAX_ROWS_PER_PAGE = _env_int('EXCEL_TABLE_MAX_ROWS_PER_PAGE', 15)
 EXCEL_TABLE_OPTIMIZATION = _env_bool('EXCEL_TABLE_OPTIMIZATION', True)
 
 # =============================================================================
+# Advanced Layout Recognition Settings (Docling)
+# =============================================================================
+
+# Enable Docling converter for enhanced layout recognition
+# Requires: pip install docling
+# Best for: Complex Excel tables, multi-sheet workbooks, advanced layout analysis
+USE_DOCLING_CONVERTER = _env_bool('USE_DOCLING_CONVERTER', False)
+# Docling converter priority (higher = try earlier)
+# 0=disabled, 1=fallback only, 2=before Python converters, 3=before LibreOffice, 4=before MS Office
+DOCLING_PRIORITY = _env_int('DOCLING_PRIORITY', 2)
+
+# =============================================================================
 # RAG & Knowledge Base Optimization Settings
 # =============================================================================
 

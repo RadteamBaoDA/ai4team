@@ -428,6 +428,8 @@ Contributions are welcome! Please ensure:
 
 ### Quick Links
 - 🆕 **[What's New in v2.5](WHATS_NEW_V2.5.md)** - User-friendly v2.5 feature guide
+- 🚀 **[Docling Integration](docs/DOCLING_INTEGRATION.md)** - Advanced layout recognition for complex tables
+- 📊 **[RAG Optimization Guide](docs/RAG_OPTIMIZATION_GUIDE.md)** - RAG/KB system configuration
 - 📚 **[What's New in v2.4](docs/WHATS_NEW_V2.4.md)** - v2.4 feature guide
 - 🎯 **[Quick Reference](docs/QUICKREF_V2.4.md)** - Quick start guide with examples
 - 📖 **[Complete Summary](docs/V2.4_COMPLETION_SUMMARY.md)** - Technical details

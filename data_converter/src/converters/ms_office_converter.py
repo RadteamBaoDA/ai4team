@@ -282,6 +282,37 @@ class MSOfficeConverter(BaseConverter):
                 
                 self.logger.info(f"Processing Excel workbook: {input_file.name} ({sheet_count} sheets)")
 
+                # RAG Optimization: Add workbook metadata for better search
+                if RAG_OPTIMIZATION_ENABLED and WORD_ADD_DOC_PROPERTIES:
+                    try:
+                        props = workbook.BuiltInDocumentProperties
+                        if not props("Title").Value:
+                            props("Title").Value = input_file.stem
+                        props("Subject").Value = f"Converted from: {input_file.name}"
+                        props("Category").Value = "RAG Export"
+
+                        keywords = [input_file.stem, "Excel", "RAG"]
+                        if CITATION_INCLUDE_FILENAME:
+                            keywords.append(input_file.name)
+                        if CITATION_INCLUDE_PAGE and sheet_count:
+                            keywords.append(f"sheets:{sheet_count}")
+                        props("Keywords").Value = ", ".join(dict.fromkeys(keywords))
+
+                        metadata_parts = []
+                        if CITATION_INCLUDE_FILENAME:
+                            metadata_parts.append(f"Source: {input_file.name}")
+                        if CITATION_INCLUDE_PAGE and sheet_count:
+                            metadata_parts.append(f"Sheets: {sheet_count}")
+                        if CITATION_INCLUDE_DATE:
+                            from datetime import datetime
+                            metadata_parts.append(
+                                f"Converted: {datetime.now().strftime(CITATION_DATE_FORMAT)}"
+                            )
+                        if metadata_parts:
+                            props("Comments").Value = " | ".join(metadata_parts)
+                    except Exception as e:
+                        self.logger.debug(f"Could not set Excel document properties: {e}")
+
                 for idx in range(1, sheet_count + 1):
                     sheet = workbook.Worksheets(idx)
                     sheet_name = getattr(sheet, "Name", f"Sheet {idx}")
@@ -306,7 +337,7 @@ class MSOfficeConverter(BaseConverter):
                     Type=0, 
                     Filename=str(output_file.resolve()),
                     Quality=0,
-                    IncludeDocProperties=True,
+                    IncludeDocProperties=WORD_ADD_DOC_PROPERTIES if RAG_OPTIMIZATION_ENABLED else True,
                     IgnorePrintAreas=True,
                     OpenAfterPublish=False
                 )
