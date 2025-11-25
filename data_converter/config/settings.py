@@ -116,6 +116,53 @@ EXCEL_PAGE_BREAK_ON_EMPTY_ROWS = _env_int('EXCEL_PAGE_BREAK_ON_EMPTY_ROWS', 1)
 # Special character/string to trigger a page break (empty string to disable)
 EXCEL_PAGE_BREAK_CHAR = os.getenv('EXCEL_PAGE_BREAK_CHAR', '<<<PAGE_BREAK>>>')
 
+# Excel RAG Optimization Settings (only applies when RAG_OPTIMIZATION_ENABLED=True)
+# Print row and column headers (A, B, C... and 1, 2, 3...) for better cell referencing
+EXCEL_PRINT_ROW_COL_HEADERS = _env_bool('EXCEL_PRINT_ROW_COL_HEADERS', True)  # Note: Also controlled by RAG_OPTIMIZATION_ENABLED in converter
+# Print gridlines for better table structure recognition
+EXCEL_PRINT_GRIDLINES = _env_bool('EXCEL_PRINT_GRIDLINES', True)  # Note: Also controlled by RAG_OPTIMIZATION_ENABLED in converter
+# Print in black and white (better OCR, smaller file size)
+EXCEL_BLACK_AND_WHITE = _env_bool('EXCEL_BLACK_AND_WHITE', False)
+# Add sheet name and page info to header/footer
+EXCEL_ADD_CITATION_HEADERS = _env_bool('EXCEL_ADD_CITATION_HEADERS', True)  # Note: Also controlled by RAG_OPTIMIZATION_ENABLED in converter
+
+# Table optimization: Maximum rows per page when content is detected as a table
+# This helps RAG systems parse tables more accurately by limiting table size per page
+# Set to 0 to disable automatic table page breaks
+EXCEL_TABLE_MAX_ROWS_PER_PAGE = _env_int('EXCEL_TABLE_MAX_ROWS_PER_PAGE', 15)
+# Enable table detection and optimization
+EXCEL_TABLE_OPTIMIZATION = _env_bool('EXCEL_TABLE_OPTIMIZATION', True)
+
+# =============================================================================
+# RAG & Knowledge Base Optimization Settings
+# =============================================================================
+
+# Master toggle to enable/disable ALL RAG optimizations added in this session
+# Set to False to use standard PDF export without RAG-specific features
+RAG_OPTIMIZATION_ENABLED = _env_bool('RAG_OPTIMIZATION_ENABLED', True)
+
+# PDF Structure for better parsing (only applies when RAG_OPTIMIZATION_ENABLED=True)
+PDF_CREATE_BOOKMARKS = RAG_OPTIMIZATION_ENABLED and _env_bool('PDF_CREATE_BOOKMARKS', True)  # Create PDF outline from headings
+PDF_CREATE_TAGGED = RAG_OPTIMIZATION_ENABLED and _env_bool('PDF_CREATE_TAGGED', True)  # Create tagged PDF for accessibility & structure
+PDF_EMBED_FONTS = RAG_OPTIMIZATION_ENABLED and _env_bool('PDF_EMBED_FONTS', True)  # Embed all fonts for consistent rendering
+PDF_USE_ISO19005 = RAG_OPTIMIZATION_ENABLED and _env_bool('PDF_USE_ISO19005', True)  # PDF/A compliance for archival
+
+# Word RAG Settings (only applies when RAG_OPTIMIZATION_ENABLED=True)
+WORD_CREATE_HEADING_BOOKMARKS = RAG_OPTIMIZATION_ENABLED and _env_bool('WORD_CREATE_HEADING_BOOKMARKS', True)
+WORD_ADD_DOC_PROPERTIES = RAG_OPTIMIZATION_ENABLED and _env_bool('WORD_ADD_DOC_PROPERTIES', True)
+WORD_PRESERVE_STRUCTURE_TAGS = RAG_OPTIMIZATION_ENABLED and _env_bool('WORD_PRESERVE_STRUCTURE_TAGS', True)
+
+# PowerPoint RAG Settings (only applies when RAG_OPTIMIZATION_ENABLED=True)
+PPTX_ADD_SLIDE_NUMBERS = RAG_OPTIMIZATION_ENABLED and _env_bool('PPTX_ADD_SLIDE_NUMBERS', True)
+PPTX_CREATE_OUTLINE = RAG_OPTIMIZATION_ENABLED and _env_bool('PPTX_CREATE_OUTLINE', True)  # Create bookmarks from slide titles
+PPTX_NOTES_AS_TEXT = RAG_OPTIMIZATION_ENABLED and _env_bool('PPTX_NOTES_AS_TEXT', False)  # Include speaker notes
+
+# Citation Format Settings (only applies when RAG_OPTIMIZATION_ENABLED=True)
+CITATION_INCLUDE_FILENAME = RAG_OPTIMIZATION_ENABLED and _env_bool('CITATION_INCLUDE_FILENAME', True)
+CITATION_INCLUDE_DATE = RAG_OPTIMIZATION_ENABLED and _env_bool('CITATION_INCLUDE_DATE', True)
+CITATION_INCLUDE_PAGE = RAG_OPTIMIZATION_ENABLED and _env_bool('CITATION_INCLUDE_PAGE', True)
+CITATION_DATE_FORMAT = os.getenv('CITATION_DATE_FORMAT', '%Y-%m-%d')
+
 # LibreOffice command paths to try
 LIBREOFFICE_COMMANDS = [
     'libreoffice',

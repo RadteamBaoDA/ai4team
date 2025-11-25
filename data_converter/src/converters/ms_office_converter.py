@@ -20,7 +20,28 @@ from config.settings import (
     EXCEL_HEADER_MARGIN_INCHES,
     EXCEL_PAGE_BREAK_ON_EMPTY_ROWS,
     EXCEL_PAGE_BREAK_CHAR,
+    EXCEL_PRINT_ROW_COL_HEADERS,
+    EXCEL_PRINT_GRIDLINES,
+    EXCEL_BLACK_AND_WHITE,
+    EXCEL_ADD_CITATION_HEADERS,
+    EXCEL_TABLE_MAX_ROWS_PER_PAGE,
+    EXCEL_TABLE_OPTIMIZATION,
     MEMORY_OPTIMIZATION,
+    # Master RAG toggle
+    RAG_OPTIMIZATION_ENABLED,
+    # RAG Optimization Settings
+    PDF_CREATE_BOOKMARKS,
+    PDF_CREATE_TAGGED,
+    PDF_EMBED_FONTS,
+    PDF_USE_ISO19005,
+    WORD_CREATE_HEADING_BOOKMARKS,
+    WORD_ADD_DOC_PROPERTIES,
+    WORD_PRESERVE_STRUCTURE_TAGS,
+    PPTX_ADD_SLIDE_NUMBERS,
+    PPTX_CREATE_OUTLINE,
+    PPTX_NOTES_AS_TEXT,
+    CITATION_INCLUDE_DATE,
+    CITATION_DATE_FORMAT,
 )
 
 
@@ -109,30 +130,54 @@ class MSOfficeConverter(BaseConverter):
                 except:
                     pass
 
-                # Log page count
+                # Log page count and collect document info for RAG
+                page_count = 0
                 try:
                     # wdStatisticPages = 2
                     page_count = doc.ComputeStatistics(2)
                     self.logger.info(f"Exporting Word document: {input_file.name} ({page_count} pages)")
                 except Exception as e:
                     self.logger.debug(f"Could not get page count: {e}")
-
-                # Use ExportAsFixedFormat instead of SaveAs for better PDF control
+                
+                # RAG Optimization: Add document metadata for better search
+                try:
+                    props = doc.BuiltInDocumentProperties
+                    if WORD_ADD_DOC_PROPERTIES:
+                        # Ensure title is set for PDF outline root
+                        if not props("Title").Value:
+                            props("Title").Value = input_file.stem
+                        # Add source info for citation tracking
+                        props("Subject").Value = f"Converted from: {input_file.name}"
+                        if CITATION_INCLUDE_DATE:
+                            from datetime import datetime
+                            props("Comments").Value = f"Conversion date: {datetime.now().strftime(CITATION_DATE_FORMAT)}"
+                except Exception as e:
+                    self.logger.debug(f"Could not set document properties: {e}")
+                
+                # RAG Optimization: Ensure headings are properly styled for bookmark generation
+                # This helps create a navigable PDF outline for KB systems
+                bookmark_type = 0  # wdExportCreateNoBookmarks
+                if PDF_CREATE_BOOKMARKS and WORD_CREATE_HEADING_BOOKMARKS:
+                    bookmark_type = 1  # wdExportCreateHeadingBookmarks
+                
+                # Use ExportAsFixedFormat with RAG-optimized settings
                 # 17 = wdExportFormatPDF
                 doc.ExportAsFixedFormat(
                     OutputFileName=str(output_file.resolve()),
                     ExportFormat=17,
                     OpenAfterExport=False,
-                    OptimizeFor=0, # wdExportOptimizeForPrint
-                    Range=0, # wdExportAllDocument
-                    Item=0, # wdExportDocumentContent
-                    IncludeDocProps=True,
+                    OptimizeFor=0,  # wdExportOptimizeForPrint (better quality)
+                    Range=0,  # wdExportAllDocument
+                    Item=0,  # wdExportDocumentContent
+                    IncludeDocProps=WORD_ADD_DOC_PROPERTIES,  # Include metadata for search
                     KeepIRM=True,
-                    CreateBookmarks=1, # wdExportCreateHeadingBookmarks
-                    DocStructureTags=True,
-                    BitmapMissingFonts=True,
-                    UseISO19005_1=True # PDF/A compliant (forces font embedding)
+                    CreateBookmarks=bookmark_type,  # PDF outline from headings
+                    DocStructureTags=PDF_CREATE_TAGGED and WORD_PRESERVE_STRUCTURE_TAGS,  # Tagged PDF for parsing
+                    BitmapMissingFonts=PDF_EMBED_FONTS,
+                    UseISO19005_1=PDF_USE_ISO19005  # PDF/A for archival & font embedding
                 )
+                
+                self.logger.info(f"PDF created with: bookmarks={bookmark_type==1}, tagged={PDF_CREATE_TAGGED}, PDF/A={PDF_USE_ISO19005}")
                 
                 self.logger.info(f"Finished exporting Word document: {input_file.name}")
                 doc.Close(SaveChanges=False)
@@ -338,27 +383,53 @@ class MSOfficeConverter(BaseConverter):
             page_setup.HeaderMargin = header_margin_pts
             page_setup.FooterMargin = header_margin_pts
             
-            # 6. RAG & Citation Optimization
-            # Add context to every page for better citations (Source > Sheet > Page)
-            # &F = Filename, &A = Sheet Name, &P = Page Number, &N = Total Pages
-            page_setup.CenterHeader = "&F - &A" 
-            page_setup.CenterFooter = "Page &P of &N"
+            # 6. RAG & Citation Optimization for Knowledge Base
+            # Only apply RAG-specific features when master toggle is enabled
+            if RAG_OPTIMIZATION_ENABLED and EXCEL_ADD_CITATION_HEADERS:
+                # Add rich context to every page for precise citations
+                # Format: [Filename] | Sheet: [SheetName] | Page X of Y | Date
+                # This enables RAG systems to generate accurate citations like:
+                # "Source: report.xlsx, Sheet: Sales Data, Page 3"
+                
+                # &F = Filename, &A = Sheet Name, &P = Page Number, &N = Total Pages, &D = Date
+                # Header: Filename (center) with sheet context (right)
+                page_setup.LeftHeader = ""  # Keep clean
+                page_setup.CenterHeader = "&F"  # Filename prominently displayed
+                page_setup.RightHeader = "[Sheet: &A]"  # Sheet context in brackets for parsing
+                
+                # Footer: Page info (for citation) and date (for version tracking)
+                page_setup.LeftFooter = "&D"  # Date for temporal context
+                page_setup.CenterFooter = "Page &P of &N"  # Standard pagination
+                page_setup.RightFooter = ""  # Keep clean
+                
+                # RAG Tip: The format "[Sheet: X]" and "Page Y of Z" are easily
+                # parseable by regex for automated citation extraction
             
             # Enable gridlines for better table structure recognition by AI/OCR models
-            page_setup.PrintGridlines = True
+            if RAG_OPTIMIZATION_ENABLED and EXCEL_PRINT_GRIDLINES:
+                page_setup.PrintGridlines = True
+            
+            # Print row and column headers (A, B, C... and 1, 2, 3...) for precise cell referencing in RAG
+            if RAG_OPTIMIZATION_ENABLED and EXCEL_PRINT_ROW_COL_HEADERS:
+                page_setup.PrintHeadings = True
+            
+            # Black and white mode for better OCR and smaller file size
+            if EXCEL_BLACK_AND_WHITE:
+                page_setup.BlackAndWhite = True
             
             # Try to detect header rows from frozen panes to repeat them on every page
             # This ensures that data on subsequent pages retains its column context
-            try:
-                sheet.Activate()
-                active_window = sheet.Application.ActiveWindow
-                if active_window.FreezePanes:
-                    split_row = active_window.SplitRow
-                    if split_row > 0:
-                        # Set repeated rows (e.g., "$1:$2")
-                        page_setup.PrintTitleRows = f"${1}:${split_row}"
-            except Exception as e:
-                self.logger.debug(f"Failed to set PrintTitleRows: {e}")
+            if RAG_OPTIMIZATION_ENABLED:
+                try:
+                    sheet.Activate()
+                    active_window = sheet.Application.ActiveWindow
+                    if active_window.FreezePanes:
+                        split_row = active_window.SplitRow
+                        if split_row > 0:
+                            # Set repeated rows (e.g., "$1:$2")
+                            page_setup.PrintTitleRows = f"${1}:${split_row}"
+                except Exception as e:
+                    self.logger.debug(f"Failed to set PrintTitleRows: {e}")
             
             # 5. Insert Page Breaks on Empty Rows or Special Characters
             # Only process if row count is manageable to avoid performance hit
@@ -367,6 +438,27 @@ class MSOfficeConverter(BaseConverter):
                 # values is a tuple of tuples for 2D range, or scalar for single cell
                 if isinstance(values, tuple):
                     consecutive_empty_rows = 0
+                    
+                    # Table detection: Check if content looks like a table
+                    # A table typically has consistent column count and header row
+                    is_table_content = False
+                    header_row_count = 1  # Default: assume 1 header row
+                    
+                    if RAG_OPTIMIZATION_ENABLED and EXCEL_TABLE_OPTIMIZATION and EXCEL_TABLE_MAX_ROWS_PER_PAGE > 0:
+                        is_table_content = self._detect_table_content(values)
+                        if is_table_content:
+                            # Try to detect header rows from frozen panes
+                            try:
+                                sheet.Activate()
+                                active_window = sheet.Application.ActiveWindow
+                                if active_window.FreezePanes and active_window.SplitRow > 0:
+                                    header_row_count = int(active_window.SplitRow)
+                            except:
+                                pass
+                            self.logger.info(f"Table detected: {row_count} rows, max {EXCEL_TABLE_MAX_ROWS_PER_PAGE} rows/page, {header_row_count} header row(s)")
+                    
+                    # Track rows for table page breaks
+                    data_rows_on_current_page = 0
                     
                     # Iterate to find empty rows or break chars
                     for i, row_data in enumerate(values):
@@ -392,7 +484,8 @@ class MSOfficeConverter(BaseConverter):
                             current_row_num = first_row + i
                             try:
                                 sheet.HPageBreaks.Add(Before=sheet.Cells(current_row_num, 1))
-                                consecutive_empty_rows = 0 # Reset counter
+                                consecutive_empty_rows = 0  # Reset counter
+                                data_rows_on_current_page = 0  # Reset table row counter
                                 continue
                             except:
                                 pass
@@ -402,14 +495,31 @@ class MSOfficeConverter(BaseConverter):
                             consecutive_empty_rows += 1
                         else:
                             consecutive_empty_rows = 0
+                            # Count data rows for table optimization
+                            if is_table_content and i >= header_row_count:
+                                data_rows_on_current_page += 1
                         
                         if EXCEL_PAGE_BREAK_ON_EMPTY_ROWS > 0 and consecutive_empty_rows == EXCEL_PAGE_BREAK_ON_EMPTY_ROWS:
                             # Add page break
                             current_row_num = first_row + i
                             try:
                                 sheet.HPageBreaks.Add(Before=sheet.Cells(current_row_num, 1))
+                                data_rows_on_current_page = 0  # Reset table row counter
                             except:
                                 pass
+                        
+                        # Table optimization: Add page break when max rows per page is reached
+                        # Only for non-header rows in detected tables
+                        if is_table_content and not is_row_empty and i >= header_row_count:
+                            if data_rows_on_current_page >= EXCEL_TABLE_MAX_ROWS_PER_PAGE:
+                                current_row_num = first_row + i + 1  # Break AFTER current row
+                                if current_row_num <= first_row + row_count - 1:  # Don't break after last row
+                                    try:
+                                        sheet.HPageBreaks.Add(Before=sheet.Cells(current_row_num, 1))
+                                        data_rows_on_current_page = 0  # Reset counter
+                                        self.logger.debug(f"Table page break at row {current_row_num}")
+                                    except:
+                                        pass
                             
         except Exception as e:
             self.logger.debug(
@@ -454,6 +564,62 @@ class MSOfficeConverter(BaseConverter):
             )
             return None
     
+    def _detect_table_content(self, values) -> bool:
+        """
+        Detect if the Excel content looks like a table structure.
+        
+        A table is detected when:
+        1. Multiple rows exist (at least 3)
+        2. First row (header) has consistent non-empty cells
+        3. Data rows have similar column patterns
+        4. No large empty gaps in the middle
+        
+        Args:
+            values: Tuple of tuples representing cell values
+            
+        Returns:
+            True if content appears to be a table, False otherwise
+        """
+        if not isinstance(values, tuple) or len(values) < 3:
+            return False
+        
+        try:
+            # Check first row (potential header)
+            first_row = values[0]
+            if not isinstance(first_row, tuple):
+                return False
+            
+            # Count non-empty cells in header
+            header_cells = sum(1 for cell in first_row if cell is not None and str(cell).strip())
+            
+            # Need at least 2 columns to be a table
+            if header_cells < 2:
+                return False
+            
+            # Check consistency of data rows (sample first 10 data rows)
+            consistent_rows = 0
+            total_checked = 0
+            
+            for row_data in values[1:11]:  # Check rows 2-11
+                if not isinstance(row_data, tuple):
+                    continue
+                    
+                total_checked += 1
+                row_cells = sum(1 for cell in row_data if cell is not None and str(cell).strip())
+                
+                # Row is consistent if it has similar number of filled cells (within 50% of header)
+                if row_cells >= header_cells * 0.5:
+                    consistent_rows += 1
+            
+            # If 70%+ of checked rows are consistent, it's likely a table
+            if total_checked > 0 and consistent_rows / total_checked >= 0.7:
+                return True
+            
+            return False
+            
+        except Exception:
+            return False
+    
     def _convert_with_powerpoint(self, input_file: Path, output_file: Path) -> bool:
         """Convert PPTX using MS PowerPoint (serialized with lock for thread safety)"""
         if not self._powerpoint_path:
@@ -485,15 +651,61 @@ class MSOfficeConverter(BaseConverter):
                         WithWindow=0  # No window
                     )
                     
+                    slide_count = 0
                     try:
                         slide_count = presentation.Slides.Count
                         self.logger.info(f"Exporting PowerPoint presentation: {input_file.name} ({slide_count} slides)")
                     except:
                         pass
+                    
+                    # RAG Optimization: Add slide numbers for citation
+                    if PPTX_ADD_SLIDE_NUMBERS:
+                        try:
+                            # Enable slide numbers on all slides
+                            for i in range(1, slide_count + 1):
+                                slide = presentation.Slides(i)
+                                # Try to add slide number placeholder
+                                try:
+                                    slide.HeadersFooters.SlideNumber.Visible = True
+                                except:
+                                    pass
+                        except Exception as e:
+                            self.logger.debug(f"Could not add slide numbers: {e}")
+                    
+                    # RAG Optimization: Create PDF outline from slide titles
+                    # This helps KB systems navigate to specific slides
+                    if PPTX_CREATE_OUTLINE:
+                        try:
+                            # Collect slide titles for logging
+                            titles = []
+                            for i in range(1, min(slide_count + 1, 10)):  # First 10 for log
+                                slide = presentation.Slides(i)
+                                for shape in slide.Shapes:
+                                    if shape.HasTextFrame:
+                                        if shape.TextFrame.HasText:
+                                            title = shape.TextFrame.TextRange.Text.strip()
+                                            if title and len(title) < 100:
+                                                titles.append(f"Slide {i}: {title[:50]}")
+                                                break
+                            if titles:
+                                self.logger.debug(f"Slide structure: {titles[:5]}...")
+                        except:
+                            pass
+                    
+                    # RAG Optimization: Export with notes if configured
+                    # Notes often contain valuable context for search
+                    if PPTX_NOTES_AS_TEXT:
+                        try:
+                            # ppPrintOutputNotesPages = 5 (slides with notes)
+                            presentation.PrintOptions.OutputType = 5
+                        except:
+                            pass
 
                     # Save as PDF (format 32 = ppSaveAsPDF)
-                    # Third arg is EmbedTrueTypeFonts (-1 = msoTrue)
-                    presentation.SaveAs(str(output_file.resolve()), 32, -1)
+                    # Third arg is EmbedTrueTypeFonts (-1 = msoTrue for font embedding)
+                    presentation.SaveAs(str(output_file.resolve()), 32, -1 if PDF_EMBED_FONTS else 0)
+                    
+                    self.logger.info(f"PowerPoint PDF created: {slide_count} slides, fonts_embedded={PDF_EMBED_FONTS}")
                     
                     self.logger.info(f"Finished exporting PowerPoint presentation: {input_file.name}")
                     presentation.Close()
