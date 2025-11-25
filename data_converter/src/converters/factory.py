@@ -31,7 +31,8 @@ class ConverterFactory:
         
         # Define priority order
         self._primary_converters = [
-             self.ms_office,
+            self.docling,
+            self.ms_office,
             self.libreoffice           
         ]
     

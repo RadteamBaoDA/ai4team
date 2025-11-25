@@ -143,7 +143,15 @@ EXCEL_TABLE_OPTIMIZATION = _env_bool('EXCEL_TABLE_OPTIMIZATION', True)
 USE_DOCLING_CONVERTER = _env_bool('USE_DOCLING_CONVERTER', False)
 # Docling converter priority (higher = try earlier)
 # 0=disabled, 1=fallback only, 2=before Python converters, 3=before LibreOffice, 4=before MS Office
-DOCLING_PRIORITY = _env_int('DOCLING_PRIORITY', 2)
+DOCLING_PRIORITY = _env_int('DOCLING_PRIORITY', 4)
+
+# Docling API Settings (docling-serve)
+# Enable using remote Docling API instead of local processing
+DOCLING_API_ENABLED = _env_bool('DOCLING_API_ENABLED', False)
+# URL of the Docling API server (e.g., http://localhost:8000)
+DOCLING_API_URL = os.getenv('DOCLING_API_URL', 'http://localhost:8000')
+# Timeout for API requests in seconds
+DOCLING_API_TIMEOUT = _env_int('DOCLING_API_TIMEOUT', 120)
 
 # =============================================================================
 # RAG & Knowledge Base Optimization Settings

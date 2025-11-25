@@ -429,6 +429,7 @@ Contributions are welcome! Please ensure:
 ### Quick Links
 - 🆕 **[What's New in v2.5](WHATS_NEW_V2.5.md)** - User-friendly v2.5 feature guide
 - 🚀 **[Docling Integration](docs/DOCLING_INTEGRATION.md)** - Advanced layout recognition for complex tables
+- 🌏 **[Unicode/CJK Support](docs/UNICODE_CJK_SUPPORT.md)** - Japanese, Chinese, and Korean character support
 - 📊 **[RAG Optimization Guide](docs/RAG_OPTIMIZATION_GUIDE.md)** - RAG/KB system configuration
 - 📚 **[What's New in v2.4](docs/WHATS_NEW_V2.4.md)** - v2.4 feature guide
 - 🎯 **[Quick Reference](docs/QUICKREF_V2.4.md)** - Quick start guide with examples
