@@ -109,6 +109,14 @@ class MSOfficeConverter(BaseConverter):
                 except:
                     pass
 
+                # Log page count
+                try:
+                    # wdStatisticPages = 2
+                    page_count = doc.ComputeStatistics(2)
+                    self.logger.info(f"Exporting Word document: {input_file.name} ({page_count} pages)")
+                except Exception as e:
+                    self.logger.debug(f"Could not get page count: {e}")
+
                 # Use ExportAsFixedFormat instead of SaveAs for better PDF control
                 # 17 = wdExportFormatPDF
                 doc.ExportAsFixedFormat(
@@ -126,6 +134,7 @@ class MSOfficeConverter(BaseConverter):
                     UseISO19005_1=True # PDF/A compliant (forces font embedding)
                 )
                 
+                self.logger.info(f"Finished exporting Word document: {input_file.name}")
                 doc.Close(SaveChanges=False)
                 del doc
                 doc = None
@@ -203,8 +212,13 @@ class MSOfficeConverter(BaseConverter):
                 margin = excel.Application.InchesToPoints(EXCEL_MARGIN_INCHES)
                 header_margin = excel.Application.InchesToPoints(EXCEL_HEADER_MARGIN_INCHES)
                 sheet_count = workbook.Worksheets.Count
+                
+                self.logger.info(f"Processing Excel workbook: {input_file.name} ({sheet_count} sheets)")
+
                 for idx in range(1, sheet_count + 1):
                     sheet = workbook.Worksheets(idx)
+                    sheet_name = getattr(sheet, "Name", f"Sheet {idx}")
+                    self.logger.info(f"Preparing sheet {idx}/{sheet_count}: {sheet_name}")
                     try:
                         self._prepare_excel_sheet(
                             sheet,
@@ -230,6 +244,7 @@ class MSOfficeConverter(BaseConverter):
                     OpenAfterPublish=False
                 )
                 
+                self.logger.info(f"Finished exporting Excel workbook: {input_file.name}")
                 workbook.Close(SaveChanges=False)
                 del workbook
                 workbook = None
@@ -322,6 +337,28 @@ class MSOfficeConverter(BaseConverter):
             page_setup.BottomMargin = margin_pts
             page_setup.HeaderMargin = header_margin_pts
             page_setup.FooterMargin = header_margin_pts
+            
+            # 6. RAG & Citation Optimization
+            # Add context to every page for better citations (Source > Sheet > Page)
+            # &F = Filename, &A = Sheet Name, &P = Page Number, &N = Total Pages
+            page_setup.CenterHeader = "&F - &A" 
+            page_setup.CenterFooter = "Page &P of &N"
+            
+            # Enable gridlines for better table structure recognition by AI/OCR models
+            page_setup.PrintGridlines = True
+            
+            # Try to detect header rows from frozen panes to repeat them on every page
+            # This ensures that data on subsequent pages retains its column context
+            try:
+                sheet.Activate()
+                active_window = sheet.Application.ActiveWindow
+                if active_window.FreezePanes:
+                    split_row = active_window.SplitRow
+                    if split_row > 0:
+                        # Set repeated rows (e.g., "$1:$2")
+                        page_setup.PrintTitleRows = f"${1}:${split_row}"
+            except Exception as e:
+                self.logger.debug(f"Failed to set PrintTitleRows: {e}")
             
             # 5. Insert Page Breaks on Empty Rows or Special Characters
             # Only process if row count is manageable to avoid performance hit
@@ -448,9 +485,17 @@ class MSOfficeConverter(BaseConverter):
                         WithWindow=0  # No window
                     )
                     
+                    try:
+                        slide_count = presentation.Slides.Count
+                        self.logger.info(f"Exporting PowerPoint presentation: {input_file.name} ({slide_count} slides)")
+                    except:
+                        pass
+
                     # Save as PDF (format 32 = ppSaveAsPDF)
                     # Third arg is EmbedTrueTypeFonts (-1 = msoTrue)
                     presentation.SaveAs(str(output_file.resolve()), 32, -1)
+                    
+                    self.logger.info(f"Finished exporting PowerPoint presentation: {input_file.name}")
                     presentation.Close()
                     del presentation
                     presentation = None
