@@ -46,13 +46,15 @@ class ConverterFactory:
         ext = file_path.suffix.lower()
         converters = []
         
-        # Try primary converters first (LibreOffice, then MS Office)
-        # These handle most office formats
-        if ext in {'.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', 
-                   '.odt', '.ods', '.odp', '.rtf', '.html', '.htm'}:
-            for converter in self._primary_converters:
-                if converter.is_available():
-                    converters.append(converter)
+        office_like_ext = {'.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
+                           '.odt', '.ods', '.odp', '.rtf', '.html', '.htm'}
+
+        # Try Microsoft Office first; fall back to LibreOffice only if MS Office is unavailable
+        if ext in office_like_ext:
+            if self.ms_office.is_available():
+                converters.append(self.ms_office)
+            elif self.libreoffice.is_available():
+                converters.append(self.libreoffice)
         
         # Add specific Python library converter as fallback
         if ext in {'.docx', '.doc'}:

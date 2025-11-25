@@ -43,7 +43,9 @@ conversion_*.log
 
 # Output directories
 input/
+input-*/
 output/
+output-*/
 output_pdfs/
 converted_pdfs/
 sample_documents/
