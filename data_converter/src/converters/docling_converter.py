@@ -24,6 +24,7 @@ from config.settings import (
     DOCLING_API_ENABLED,
     DOCLING_API_URL,
     DOCLING_API_TIMEOUT,
+    EXCEL_SCALE_TO_FIT_WIDTH,
 )
 
 
@@ -252,11 +253,18 @@ class DoclingConverter(BaseConverter):
             output_file = Path(output_file).resolve()
             output_file.parent.mkdir(parents=True, exist_ok=True)
             
+            # Determine page size
+            page_size = landscape(letter) if self._is_wide_content(doc_obj) else letter
+            
             pdf_doc = SimpleDocTemplate(
                 str(output_file),
-                pagesize=landscape(letter) if self._is_wide_content(doc_obj) else letter,
+                pagesize=page_size,
                 title=input_file.stem,
             )
+            
+            # Calculate available width for tables
+            available_width = page_size[0] - pdf_doc.leftMargin - pdf_doc.rightMargin
+            
             elements = []
             styles = getSampleStyleSheet()
             
@@ -287,12 +295,18 @@ class DoclingConverter(BaseConverter):
                     elements.append(Spacer(1, 0.2 * inch))
             
             # Step 5: Process Docling document structure with Excel metadata
-            self._process_docling_document(doc_obj, elements, styles, input_file, excel_metadata)
+            # For Excel files, we prefer the openpyxl extraction because it preserves layout (merges, styles)
+            # much better than Docling's data extraction.
+            if input_file.suffix.lower() in {'.xlsx', '.xls'}:
+                 self._add_excel_tables_with_openpyxl(input_file, elements, styles, excel_metadata, available_width)
+            else:
+                 self._process_docling_document(doc_obj, elements, styles, input_file, excel_metadata, available_width)
             
             # Fallback: If no elements were added and this is an Excel file, use openpyxl directly
-            if len(elements) <= 2 and input_file.suffix.lower() in {'.xlsx', '.xls'}:
+            # (This block is now redundant for Excel but kept for safety if _add_excel_tables_with_openpyxl fails silently)
+            if len(elements) <= 2 and input_file.suffix.lower() in {'.xlsx', '.xls'} and not any(isinstance(e, Table) for e in elements):
                 self.logger.warning("Docling extraction produced no content, using openpyxl fallback")
-                self._add_excel_tables_with_openpyxl(input_file, elements, styles, excel_metadata)
+                self._add_excel_tables_with_openpyxl(input_file, elements, styles, excel_metadata, available_width)
             
             # Step 6: Build PDF
             if not elements:
@@ -401,11 +415,18 @@ class DoclingConverter(BaseConverter):
             output_file = Path(output_file).resolve()
             output_file.parent.mkdir(parents=True, exist_ok=True)
             
+            # Determine page size
+            page_size = landscape(letter) if self._is_wide_content(doc_obj) else letter
+            
             pdf_doc = SimpleDocTemplate(
                 str(output_file),
-                pagesize=landscape(letter) if self._is_wide_content(doc_obj) else letter,
+                pagesize=page_size,
                 title=input_file.stem,
             )
+            
+            # Calculate available width for tables
+            available_width = page_size[0] - pdf_doc.leftMargin - pdf_doc.rightMargin
+            
             elements = []
             styles = getSampleStyleSheet()
             
@@ -435,12 +456,12 @@ class DoclingConverter(BaseConverter):
                     elements.append(Spacer(1, 0.2 * inch))
             
             # Process document structure
-            self._process_docling_document(doc_obj, elements, styles, input_file, excel_metadata)
+            self._process_docling_document(doc_obj, elements, styles, input_file, excel_metadata, available_width)
             
             # Fallback for Excel
             if len(elements) <= 2 and input_file.suffix.lower() in {'.xlsx', '.xls'}:
                 self.logger.warning("API extraction produced no content, using openpyxl fallback")
-                self._add_excel_tables_with_openpyxl(input_file, elements, styles, excel_metadata)
+                self._add_excel_tables_with_openpyxl(input_file, elements, styles, excel_metadata, available_width)
             
             # Build PDF
             if not elements:
@@ -545,7 +566,7 @@ class DoclingConverter(BaseConverter):
         except:
             return False
     
-    def _process_docling_document(self, doc_obj, elements, styles, input_file: Path, excel_metadata: dict = None):
+    def _process_docling_document(self, doc_obj, elements, styles, input_file: Path, excel_metadata: dict = None, available_width: float = 0):
         """Process Docling document structure and add to PDF elements"""
         from reportlab.platypus import Table, TableStyle, Paragraph, PageBreak
         from reportlab.lib import colors
@@ -591,9 +612,9 @@ class DoclingConverter(BaseConverter):
                             
                             # Apply table pagination if enabled
                             if RAG_OPTIMIZATION_ENABLED and EXCEL_TABLE_OPTIMIZATION and EXCEL_TABLE_MAX_ROWS_PER_PAGE > 0:
-                                self._add_paginated_table(table_data, elements, input_file, frozen_rows, sheet_name)
+                                self._add_paginated_table(table_data, elements, input_file, frozen_rows, sheet_name, available_width=available_width)
                             else:
-                                self._add_single_table(table_data, elements)
+                                self._add_single_table(table_data, elements, available_width=available_width)
                         
                     elif item_type in ('paragraph', 'text', 'Paragraph', 'Text'):
                         text = self._extract_text(item)
@@ -625,7 +646,7 @@ class DoclingConverter(BaseConverter):
                     if table_data:
                         if RAG_OPTIMIZATION_ENABLED and EXCEL_PRINT_ROW_COL_HEADERS:
                             table_data = self._add_row_col_headers(table_data)
-                        self._add_single_table(table_data, elements)
+                        self._add_single_table(table_data, elements, available_width=available_width)
             
             if items_processed == 0:
                 self.logger.warning(f"No content extracted from Docling document. Document structure: {dir(doc_obj)[:10]}")
@@ -666,58 +687,166 @@ class DoclingConverter(BaseConverter):
             
         return self._unicode_font
 
-    def _add_excel_tables_with_openpyxl(self, input_file: Path, elements, styles, excel_metadata: dict):
+    def _add_excel_tables_with_openpyxl(self, input_file: Path, elements, styles, excel_metadata: dict, available_width: float = 0):
         """Fallback: Extract Excel tables directly with openpyxl when Docling fails"""
         try:
             import openpyxl
+            from openpyxl.utils import get_column_letter
+            from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
             from reportlab.platypus import Paragraph, Spacer, PageBreak
-            from reportlab.lib.units import inch
+            from reportlab.lib.units import inch, cm
+            from reportlab.lib import colors
             
-            workbook = openpyxl.load_workbook(str(input_file), data_only=True)
+            # Load workbook - need styles so don't use data_only
+            # Actually we need both values and styles, load twice or use data_only=False
+            workbook = openpyxl.load_workbook(str(input_file), data_only=False)
             sheet_names = excel_metadata.get('sheet_names', [sheet.title for sheet in workbook.worksheets])
             sheets_processed = 0
             
             self.logger.info(f"Processing {len(sheet_names)} sheets with openpyxl fallback")
             
+            def get_xl_color(xl_color):
+                """Convert openpyxl color to ReportLab color"""
+                if not xl_color:
+                    return None
+                try:
+                    if hasattr(xl_color, 'rgb') and xl_color.rgb:
+                        rgb = str(xl_color.rgb)
+                        if rgb == '00000000' or not rgb or len(rgb) < 6:
+                            return None
+                        if len(rgb) > 6:
+                            rgb = rgb[2:]
+                        int(rgb, 16)
+                        return colors.HexColor(f"#{rgb}")
+                except (ValueError, TypeError):
+                    return None
+                return None
+
             for idx, sheet_name in enumerate(sheet_names):
                 try:
                     sheet = workbook[sheet_name]
                     
-                    # Extract data from sheet
+                    # Get actual dimensions
+                    max_row = sheet.max_row or 1
+                    max_col = sheet.max_column or 1
+                    
+                    if max_row == 0 or max_col == 0:
+                        continue
+                    
+                    # Extract column widths from Excel (in characters, convert to points)
+                    # Excel default width is ~8.43 characters, 1 character ≈ 7 points
+                    excel_col_widths = []
+                    total_excel_width = 0
+                    for c in range(1, max_col + 1):
+                        col_letter = get_column_letter(c)
+                        width = sheet.column_dimensions[col_letter].width
+                        if width is None:
+                            width = 8.43  # Excel default
+                        excel_col_widths.append(width)
+                        total_excel_width += width
+                    
+                    # Scale column widths to fit available page width
+                    if available_width > 0 and total_excel_width > 0:
+                        scale = available_width / (total_excel_width * 7)  # 7 points per character unit
+                        col_widths = [w * 7 * scale for w in excel_col_widths]
+                    else:
+                        col_widths = [w * 7 for w in excel_col_widths]  # Default scaling
+                    
+                    # Extract row heights (in points, Excel uses points)
+                    row_heights = []
+                    for r in range(1, max_row + 1):
+                        height = sheet.row_dimensions[r].height
+                        if height is None:
+                            height = 15  # Excel default ~15 points
+                        row_heights.append(height)
+                    
+                    # Extract data and styles
                     table_data = []
                     sheet_text_content = ""
+                    style_commands = []
                     
-                    for row in sheet.iter_rows(values_only=True):
-                        # Skip completely empty rows
-                        if any(cell is not None for cell in row):
-                            # Ensure proper Unicode handling
-                            row_data = []
-                            for cell in row:
-                                if cell is None:
-                                    row_data.append('')
-                                else:
-                                    # Convert to string and ensure Unicode
-                                    cell_str = str(cell)
-                                    # Handle potential encoding issues
-                                    try:
-                                        # Ensure it's proper Unicode
-                                        cell_str.encode('utf-8').decode('utf-8')
-                                        row_data.append(cell_str)
-                                        sheet_text_content += cell_str
-                                    except (UnicodeDecodeError, UnicodeEncodeError):
-                                        # Try to fix encoding issues
-                                        fixed_str = cell_str.encode('utf-8', errors='replace').decode('utf-8')
-                                        row_data.append(fixed_str)
-                                        sheet_text_content += fixed_str
-                            table_data.append(row_data)
+                    for r_idx in range(max_row):
+                        row_data = []
+                        for c_idx in range(max_col):
+                            cell = sheet.cell(r_idx + 1, c_idx + 1)
+                            
+                            # Value
+                            val = cell.value
+                            if val is None:
+                                row_data.append('')
+                            else:
+                                cell_str = str(val)
+                                try:
+                                    cell_str.encode('utf-8').decode('utf-8')
+                                    row_data.append(cell_str)
+                                    sheet_text_content += cell_str
+                                except:
+                                    row_data.append(cell_str.encode('utf-8', errors='replace').decode('utf-8'))
+                            
+                            # Background Color
+                            if cell.fill and cell.fill.start_color and cell.fill.patternType and cell.fill.patternType != 'none':
+                                bg_color = get_xl_color(cell.fill.start_color)
+                                if bg_color:
+                                    style_commands.append(('BACKGROUND', (c_idx, r_idx), (c_idx, r_idx), bg_color))
+                            
+                            # Font Color
+                            if cell.font and cell.font.color:
+                                font_color = get_xl_color(cell.font.color)
+                                if font_color:
+                                    style_commands.append(('TEXTCOLOR', (c_idx, r_idx), (c_idx, r_idx), font_color))
+                            
+                            # Alignment
+                            if cell.alignment:
+                                if cell.alignment.horizontal:
+                                    align_map = {'left': 'LEFT', 'center': 'CENTER', 'right': 'RIGHT', 'justify': 'LEFT', 'general': 'LEFT', 'fill': 'LEFT', 'centerContinuous': 'CENTER', 'distributed': 'LEFT'}
+                                    h_align = str(cell.alignment.horizontal).lower()
+                                    if h_align in align_map:
+                                        style_commands.append(('ALIGN', (c_idx, r_idx), (c_idx, r_idx), align_map[h_align]))
+                                if cell.alignment.vertical:
+                                    valign_map = {'top': 'TOP', 'center': 'MIDDLE', 'bottom': 'BOTTOM', 'justify': 'TOP', 'distributed': 'TOP'}
+                                    v_align = str(cell.alignment.vertical).lower()
+                                    if v_align in valign_map:
+                                        style_commands.append(('VALIGN', (c_idx, r_idx), (c_idx, r_idx), valign_map[v_align]))
+                            
+                            # Border (add grid lines for cells with borders)
+                            if cell.border:
+                                has_border = any([
+                                    cell.border.left and cell.border.left.style,
+                                    cell.border.right and cell.border.right.style,
+                                    cell.border.top and cell.border.top.style,
+                                    cell.border.bottom and cell.border.bottom.style
+                                ])
+                                if has_border:
+                                    # Add box around cell
+                                    style_commands.append(('BOX', (c_idx, r_idx), (c_idx, r_idx), 0.5, colors.black))
+
+                        table_data.append(row_data)
                     
+                    # Handle Merged Cells - this is crucial for layout
+                    for merge_range in sheet.merged_cells.ranges:
+                        min_col, min_row, max_col_m, max_row_m = merge_range.bounds
+                        sc, sr = min_col - 1, min_row - 1
+                        ec, er = max_col_m - 1, max_row_m - 1
+                        
+                        if sr < len(table_data) and sc < len(table_data[0] if table_data else 0):
+                            # Apply SPAN for merged cells
+                            style_commands.append(('SPAN', (sc, sr), (ec, er)))
+                            # Get alignment from the top-left cell of the merge
+                            merge_cell = sheet.cell(min_row, min_col)
+                            if merge_cell.alignment:
+                                h_align = str(merge_cell.alignment.horizontal or 'center').lower()
+                                v_align = str(merge_cell.alignment.vertical or 'center').lower()
+                                align_map = {'left': 'LEFT', 'center': 'CENTER', 'right': 'RIGHT', 'justify': 'LEFT', 'general': 'LEFT'}
+                                valign_map = {'top': 'TOP', 'center': 'MIDDLE', 'bottom': 'BOTTOM'}
+                                style_commands.append(('ALIGN', (sc, sr), (ec, er), align_map.get(h_align, 'CENTER')))
+                                style_commands.append(('VALIGN', (sc, sr), (ec, er), valign_map.get(v_align, 'MIDDLE')))
+
                     # Determine best font for this sheet
                     sheet_font = self._get_best_font_for_text(sheet_text_content)
                     self.logger.debug(f"Selected font '{sheet_font}' for sheet '{sheet_name}'")
                     
                     # Add sheet header
                     if RAG_OPTIMIZATION_ENABLED and EXCEL_ADD_CITATION_HEADERS:
-                        # Use sheet font for header too
                         header_style = styles['Heading2']
                         if sheet_font:
                             header_style.fontName = sheet_font
@@ -725,25 +854,27 @@ class DoclingConverter(BaseConverter):
                         elements.append(Spacer(1, 0.1*inch))
                     
                     if table_data:
-                        # Add row/column headers if enabled
-                        if RAG_OPTIMIZATION_ENABLED and EXCEL_PRINT_ROW_COL_HEADERS:
-                            table_data = self._add_row_col_headers(table_data)
-                        
+                        # Don't add row/col headers when preserving layout
                         # Get frozen panes info
                         frozen_rows = excel_metadata.get('frozen_panes', {}).get(sheet_name, 0)
+                        header_rows = max(frozen_rows, 1)
                         
-                        # Apply pagination
-                        if RAG_OPTIMIZATION_ENABLED and EXCEL_TABLE_OPTIMIZATION and EXCEL_TABLE_MAX_ROWS_PER_PAGE > 0:
-                            self._add_paginated_table(table_data, elements, input_file, frozen_rows, sheet_name, font_name=sheet_font)
-                        else:
-                            self._add_single_table(table_data, elements, font_name=sheet_font)
+                        # Create table with explicit column widths and row heights
+                        self._add_single_table_with_dimensions(
+                            table_data, elements, 
+                            font_name=sheet_font, 
+                            col_widths=col_widths,
+                            row_heights=row_heights,
+                            extra_commands=style_commands, 
+                            header_rows=header_rows
+                        )
                         
                         sheets_processed += 1
                         self.logger.info(f"Processed sheet {idx+1}/{len(sheet_names)}: {sheet_name} ({len(table_data)} rows)")
                     else:
                         self.logger.warning(f"Sheet '{sheet_name}' has no data, skipping")
                     
-                    # Add page break between sheets (except for last sheet)
+                    # Add page break between sheets
                     if idx < len(sheet_names) - 1:
                         elements.append(PageBreak())
                     else:
@@ -751,6 +882,8 @@ class DoclingConverter(BaseConverter):
                         
                 except Exception as sheet_error:
                     self.logger.error(f"Failed to process sheet '{sheet_name}': {sheet_error}")
+                    import traceback
+                    self.logger.debug(traceback.format_exc())
             
             workbook.close()
             self.logger.info(f"Successfully extracted {sheets_processed} sheets using openpyxl fallback")
@@ -876,18 +1009,19 @@ class DoclingConverter(BaseConverter):
         
         return new_data
     
-    def _add_paginated_table(self, table_data, elements, input_file: Path, frozen_rows: int = 0, sheet_name: str = None, font_name: str = None):
+    def _add_paginated_table(self, table_data, elements, input_file: Path, frozen_rows: int = 0, sheet_name: str = None, font_name: str = None, available_width: float = 0, extra_commands: list = None):
         """Add table with pagination based on EXCEL_TABLE_MAX_ROWS_PER_PAGE"""
         from reportlab.platypus import Table, TableStyle, PageBreak, Paragraph
         from reportlab.lib import colors
         from reportlab.lib.styles import getSampleStyleSheet
         
+        # Determine header rows
+        header_row_count = max(frozen_rows, 1)
+        
         if not table_data or len(table_data) < 2:
-            self._add_single_table(table_data, elements, font_name)
+            self._add_single_table(table_data, elements, font_name, available_width, extra_commands, header_rows=header_row_count)
             return
         
-        # Determine header rows (frozen panes take precedence)
-        header_row_count = max(frozen_rows, 1)
         if header_row_count >= len(table_data):
             header_row_count = 1
         
@@ -897,6 +1031,11 @@ class DoclingConverter(BaseConverter):
         
         if frozen_rows > 0:
             self.logger.info(f"Repeating {frozen_rows} frozen header row(s) on each page")
+        
+        # Calculate column widths if scaling is enabled
+        col_widths = None
+        if EXCEL_SCALE_TO_FIT_WIDTH and available_width > 0:
+            col_widths = self._calculate_col_widths(table_data, available_width)
         
         # Split into chunks
         total_pages = (len(data_rows) + max_rows - 1) // max_rows
@@ -913,25 +1052,106 @@ class DoclingConverter(BaseConverter):
                     citation += f" (Sheet: {sheet_name})"
                 elements.append(Paragraph(f"<i>{citation}</i>", styles['Normal']))
             
-            table = Table(chunk_data)
-            self._apply_table_style(table, header_row_count, font_name)
+            table = Table(chunk_data, colWidths=col_widths)
+            
+            # Filter extra_commands for pagination to avoid index out of range errors
+            # This is complex, so we only apply extra_commands to the first page if they exist
+            # and warn about potential style loss. 
+            # Ideally, use _add_single_table for styled content.
+            page_commands = None
+            if extra_commands and page_num == 1:
+                # Only keep commands that apply to the header or the first chunk rows
+                # This is a rough approximation.
+                page_commands = []
+                chunk_len = len(chunk_data)
+                for cmd in extra_commands:
+                    # cmd is (OP, START, STOP, ...)
+                    # START/STOP are (col, row). row can be -1 (all)
+                    # We just check if it looks safe.
+                    try:
+                        start_row = cmd[1][1]
+                        stop_row = cmd[2][1]
+                        # If row is explicit and out of bounds, skip
+                        if isinstance(start_row, int) and start_row >= 0 and start_row >= chunk_len:
+                            continue
+                        if isinstance(stop_row, int) and stop_row >= 0 and stop_row >= chunk_len:
+                            # Clamp or skip? Skip to be safe.
+                            continue
+                        page_commands.append(cmd)
+                    except:
+                        # If we can't parse, include it and hope
+                        page_commands.append(cmd)
+
+            self._apply_table_style(table, header_row_count, font_name, page_commands)
             elements.append(table)
             
             if i + max_rows < len(data_rows):
                 elements.append(PageBreak())
     
-    def _add_single_table(self, table_data, elements, font_name: str = None):
+    def _add_single_table(self, table_data, elements, font_name: str = None, available_width: float = 0, extra_commands: list = None, header_rows: int = 1):
         """Add table without pagination"""
         from reportlab.platypus import Table
         
         if not table_data:
             return
         
-        table = Table(table_data)
-        self._apply_table_style(table, font_name=font_name)
+        # Calculate column widths if scaling is enabled
+        col_widths = None
+        if EXCEL_SCALE_TO_FIT_WIDTH and available_width > 0:
+            col_widths = self._calculate_col_widths(table_data, available_width)
+        
+        # Create table with repeatRows for automatic splitting across pages
+        table = Table(table_data, colWidths=col_widths, repeatRows=header_rows)
+        self._apply_table_style(table, header_rows, font_name, extra_commands=extra_commands)
         elements.append(table)
     
-    def _apply_table_style(self, table, header_rows: int = 1, font_name: str = None):
+    def _add_single_table_with_dimensions(self, table_data, elements, font_name: str = None, col_widths: list = None, row_heights: list = None, extra_commands: list = None, header_rows: int = 1):
+        """Add table with explicit column widths and row heights from Excel"""
+        from reportlab.platypus import Table
+        
+        if not table_data:
+            return
+        
+        # Create table with explicit dimensions
+        table = Table(table_data, colWidths=col_widths, rowHeights=row_heights, repeatRows=header_rows)
+        self._apply_table_style(table, header_rows, font_name, extra_commands=extra_commands)
+        elements.append(table)
+    
+    def _calculate_col_widths(self, table_data, available_width):
+        """Calculate column widths to fit page width based on content length"""
+        if not table_data:
+            return None
+            
+        num_cols = len(table_data[0])
+        if num_cols == 0:
+            return None
+            
+        # Calculate max length of each column
+        col_max_lens = [0] * num_cols
+        for row in table_data:
+            for i, cell in enumerate(row):
+                if i < num_cols:
+                    # Estimate width: 1 for normal char, 2 for CJK
+                    # Simple heuristic: len(str(cell))
+                    # Better heuristic: count wide chars
+                    text = str(cell)
+                    length = 0
+                    for char in text:
+                        if ord(char) > 127: # Rough check for non-ASCII/wide chars
+                            length += 1.8
+                        else:
+                            length += 1.0
+                    col_max_lens[i] = max(col_max_lens[i], length)
+        
+        total_len = sum(col_max_lens)
+        if total_len == 0:
+            return [available_width / num_cols] * num_cols
+            
+        # Distribute available width proportionally
+        # Add a small minimum width to avoid zero-width columns
+        return [(length / total_len) * available_width for length in col_max_lens]
+
+    def _apply_table_style(self, table, header_rows: int = 1, font_name: str = None, extra_commands: list = None):
         """Apply RAG-optimized table styling"""
         from reportlab.platypus import TableStyle
         from reportlab.lib import colors
@@ -952,6 +1172,7 @@ class DoclingConverter(BaseConverter):
             ('BACKGROUND', (0, header_rows), (-1, -1), colors.beige),
             ('FONTNAME', (0, header_rows), (-1, -1), body_font),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ]
         
         # Add gridlines if enabled (RAG optimization for better structure recognition)
@@ -960,6 +1181,10 @@ class DoclingConverter(BaseConverter):
         else:
             # At least add lines around headers
             style_commands.append(('LINEBELOW', (0, header_rows - 1), (-1, header_rows - 1), 1, colors.black))
+            
+        # Apply extra commands (e.g. from Excel styles)
+        if extra_commands:
+            style_commands.extend(extra_commands)
         
         table.setStyle(TableStyle(style_commands))
     

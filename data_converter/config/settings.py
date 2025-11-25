@@ -132,6 +132,8 @@ EXCEL_ADD_CITATION_HEADERS = _env_bool('EXCEL_ADD_CITATION_HEADERS', True)  # No
 EXCEL_TABLE_MAX_ROWS_PER_PAGE = _env_int('EXCEL_TABLE_MAX_ROWS_PER_PAGE', 15)
 # Enable table detection and optimization
 EXCEL_TABLE_OPTIMIZATION = _env_bool('EXCEL_TABLE_OPTIMIZATION', True)
+# Scale table content to fit page width (prevents horizontal overflow)
+EXCEL_SCALE_TO_FIT_WIDTH = _env_bool('EXCEL_SCALE_TO_FIT_WIDTH', True)
 
 # =============================================================================
 # Advanced Layout Recognition Settings (Docling)
