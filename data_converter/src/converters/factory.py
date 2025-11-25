@@ -29,8 +29,8 @@ class ConverterFactory:
         
         # Define priority order
         self._primary_converters = [
-            self.libreoffice,
-            self.ms_office
+             self.ms_office,
+            self.libreoffice           
         ]
     
     def get_converters_for_file(self, file_path: Path) -> List[BaseConverter]:

@@ -40,7 +40,10 @@ from config.settings import (
     PPTX_ADD_SLIDE_NUMBERS,
     PPTX_CREATE_OUTLINE,
     PPTX_NOTES_AS_TEXT,
+    PPTX_ADD_DOC_PROPERTIES,
     CITATION_INCLUDE_DATE,
+    CITATION_INCLUDE_FILENAME,
+    CITATION_INCLUDE_PAGE,
     CITATION_DATE_FORMAT,
 )
 
@@ -146,11 +149,30 @@ class MSOfficeConverter(BaseConverter):
                         # Ensure title is set for PDF outline root
                         if not props("Title").Value:
                             props("Title").Value = input_file.stem
-                        # Add source info for citation tracking
+
                         props("Subject").Value = f"Converted from: {input_file.name}"
+                        props("Category").Value = "RAG Export"
+
+                        keywords = [input_file.stem, "RAG", "Knowledge Base"]
+                        if CITATION_INCLUDE_FILENAME:
+                            keywords.append(input_file.name)
+                        if CITATION_INCLUDE_PAGE and page_count:
+                            keywords.append(f"pages:{page_count}")
+                        props("Keywords").Value = ", ".join(dict.fromkeys(keywords))  # remove duplicates
+
+                        metadata_parts = []
+                        if CITATION_INCLUDE_FILENAME:
+                            metadata_parts.append(f"Source: {input_file.name}")
+                        if CITATION_INCLUDE_PAGE and page_count:
+                            metadata_parts.append(f"Pages: {page_count}")
                         if CITATION_INCLUDE_DATE:
                             from datetime import datetime
-                            props("Comments").Value = f"Conversion date: {datetime.now().strftime(CITATION_DATE_FORMAT)}"
+                            metadata_parts.append(
+                                f"Converted: {datetime.now().strftime(CITATION_DATE_FORMAT)}"
+                            )
+
+                        if metadata_parts:
+                            props("Comments").Value = " | ".join(metadata_parts)
                 except Exception as e:
                     self.logger.debug(f"Could not set document properties: {e}")
                 
@@ -419,17 +441,9 @@ class MSOfficeConverter(BaseConverter):
             
             # Try to detect header rows from frozen panes to repeat them on every page
             # This ensures that data on subsequent pages retains its column context
+            frozen_header_rows = 0
             if RAG_OPTIMIZATION_ENABLED:
-                try:
-                    sheet.Activate()
-                    active_window = sheet.Application.ActiveWindow
-                    if active_window.FreezePanes:
-                        split_row = active_window.SplitRow
-                        if split_row > 0:
-                            # Set repeated rows (e.g., "$1:$2")
-                            page_setup.PrintTitleRows = f"${1}:${split_row}"
-                except Exception as e:
-                    self.logger.debug(f"Failed to set PrintTitleRows: {e}")
+                frozen_header_rows = self._ensure_frozen_panes_repeat_headers(sheet, page_setup)
             
             # 5. Insert Page Breaks on Empty Rows or Special Characters
             # Only process if row count is manageable to avoid performance hit
@@ -440,22 +454,35 @@ class MSOfficeConverter(BaseConverter):
                     consecutive_empty_rows = 0
                     
                     # Table detection: Check if content looks like a table
-                    # A table typically has consistent column count and header row
+                    # Preference order: native Excel ListObjects, otherwise heuristic detection
                     is_table_content = False
-                    header_row_count = 1  # Default: assume 1 header row
+                    header_row_count = 1  # Default header assumption
                     
-                    if RAG_OPTIMIZATION_ENABLED and EXCEL_TABLE_OPTIMIZATION and EXCEL_TABLE_MAX_ROWS_PER_PAGE > 0:
-                        is_table_content = self._detect_table_content(values)
+                    if (
+                        RAG_OPTIMIZATION_ENABLED
+                        and EXCEL_TABLE_OPTIMIZATION
+                        and EXCEL_TABLE_MAX_ROWS_PER_PAGE > 0
+                    ):
+                        (
+                            is_table_content,
+                            detected_header_rows,
+                            detected_columns,
+                        ) = self._detect_table_structure(sheet, values)
+
                         if is_table_content:
-                            # Try to detect header rows from frozen panes
-                            try:
-                                sheet.Activate()
-                                active_window = sheet.Application.ActiveWindow
-                                if active_window.FreezePanes and active_window.SplitRow > 0:
-                                    header_row_count = int(active_window.SplitRow)
-                            except:
-                                pass
-                            self.logger.info(f"Table detected: {row_count} rows, max {EXCEL_TABLE_MAX_ROWS_PER_PAGE} rows/page, {header_row_count} header row(s)")
+                            if frozen_header_rows:
+                                header_row_count = max(detected_header_rows, frozen_header_rows)
+                            else:
+                                header_row_count = max(detected_header_rows, 1)
+
+                            self.logger.info(
+                                "Table detected on %s: %d rows, %d columns, %d header row(s); forcing %d rows/page",
+                                getattr(sheet, "Name", "<unknown>"),
+                                row_count,
+                                detected_columns,
+                                header_row_count,
+                                EXCEL_TABLE_MAX_ROWS_PER_PAGE,
+                            )
                     
                     # Track rows for table page breaks
                     data_rows_on_current_page = 0
@@ -564,61 +591,80 @@ class MSOfficeConverter(BaseConverter):
             )
             return None
     
-    def _detect_table_content(self, values) -> bool:
-        """
-        Detect if the Excel content looks like a table structure.
-        
-        A table is detected when:
-        1. Multiple rows exist (at least 3)
-        2. First row (header) has consistent non-empty cells
-        3. Data rows have similar column patterns
-        4. No large empty gaps in the middle
-        
-        Args:
-            values: Tuple of tuples representing cell values
-            
-        Returns:
-            True if content appears to be a table, False otherwise
-        """
-        if not isinstance(values, tuple) or len(values) < 3:
-            return False
-        
+    def _ensure_frozen_panes_repeat_headers(self, sheet, page_setup) -> int:
+        """Set PrintTitleRows based on frozen panes and return the frozen header count."""
         try:
-            # Check first row (potential header)
+            sheet.Activate()
+            active_window = sheet.Application.ActiveWindow
+            if active_window.FreezePanes:
+                split_row = int(active_window.SplitRow)
+                if split_row > 0:
+                    page_setup.PrintTitleRows = f"${1}:${split_row}"
+                    return split_row
+        except Exception as e:
+            self.logger.debug(f"Failed to set PrintTitleRows: {e}")
+        return 0
+
+    def _detect_table_structure(self, sheet, values):
+        """Return tuple (is_table, header_rows, column_count) for the current sheet."""
+        header_rows = 1
+        column_count = 0
+
+        # Prefer explicit Excel Tables (ListObjects)
+        try:
+            list_objects = getattr(sheet, "ListObjects", None)
+            if list_objects is not None and list_objects.Count > 0:
+                table = list_objects(1)
+                try:
+                    header_rows = max(1, int(table.HeaderRowRange.Rows.Count))
+                    column_count = int(table.HeaderRowRange.Columns.Count)
+                except Exception:
+                    header_rows = 1
+                return True, header_rows, column_count
+        except Exception as table_error:
+            self.logger.debug(
+                "Excel table detection failed for %s: %s",
+                getattr(sheet, "Name", "<unknown>"),
+                table_error,
+            )
+
+        # Fallback heuristic detection using raw values
+        if not isinstance(values, tuple) or len(values) < 3:
+            return False, header_rows, column_count
+
+        try:
             first_row = values[0]
             if not isinstance(first_row, tuple):
-                return False
-            
-            # Count non-empty cells in header
+                return False, header_rows, column_count
+
             header_cells = sum(1 for cell in first_row if cell is not None and str(cell).strip())
-            
-            # Need at least 2 columns to be a table
             if header_cells < 2:
-                return False
-            
-            # Check consistency of data rows (sample first 10 data rows)
+                return False, header_rows, column_count
+
             consistent_rows = 0
             total_checked = 0
-            
-            for row_data in values[1:11]:  # Check rows 2-11
+
+            for row_data in values[1:11]:
                 if not isinstance(row_data, tuple):
                     continue
-                    
                 total_checked += 1
                 row_cells = sum(1 for cell in row_data if cell is not None and str(cell).strip())
-                
-                # Row is consistent if it has similar number of filled cells (within 50% of header)
                 if row_cells >= header_cells * 0.5:
                     consistent_rows += 1
-            
-            # If 70%+ of checked rows are consistent, it's likely a table
+
             if total_checked > 0 and consistent_rows / total_checked >= 0.7:
-                return True
-            
-            return False
-            
-        except Exception:
-            return False
+                column_count = header_cells
+                return True, header_rows, column_count
+
+            return False, header_rows, column_count
+
+        except Exception as detection_error:
+            self.logger.debug(
+                "Heuristic table detection failed for %s: %s",
+                getattr(sheet, "Name", "<unknown>"),
+                detection_error,
+            )
+            return False, header_rows, column_count
     
     def _convert_with_powerpoint(self, input_file: Path, output_file: Path) -> bool:
         """Convert PPTX using MS PowerPoint (serialized with lock for thread safety)"""
@@ -657,6 +703,49 @@ class MSOfficeConverter(BaseConverter):
                         self.logger.info(f"Exporting PowerPoint presentation: {input_file.name} ({slide_count} slides)")
                     except:
                         pass
+
+                    if PPTX_ADD_DOC_PROPERTIES:
+                        try:
+                            props = presentation.BuiltInDocumentProperties
+                            if not props("Title").Value:
+                                props("Title").Value = input_file.stem
+                            props("Subject").Value = f"Converted from: {input_file.name}"
+                            keywords = [input_file.stem, "PowerPoint", "RAG"]
+                            if CITATION_INCLUDE_FILENAME:
+                                keywords.append(input_file.name)
+                            if CITATION_INCLUDE_PAGE and slide_count:
+                                keywords.append(f"slides:{slide_count}")
+                            props("Keywords").Value = ", ".join(dict.fromkeys(keywords))
+
+                            metadata_parts = []
+                            if CITATION_INCLUDE_FILENAME:
+                                metadata_parts.append(f"Source: {input_file.name}")
+                            if CITATION_INCLUDE_PAGE and slide_count:
+                                metadata_parts.append(f"Slides: {slide_count}")
+                            if CITATION_INCLUDE_DATE:
+                                from datetime import datetime
+                                metadata_parts.append(
+                                    f"Converted: {datetime.now().strftime(CITATION_DATE_FORMAT)}"
+                                )
+                            if metadata_parts:
+                                props("Comments").Value = " | ".join(metadata_parts)
+                        except Exception as e:
+                            self.logger.debug(f"Could not set PowerPoint document properties: {e}")
+
+                    if RAG_OPTIMIZATION_ENABLED and (CITATION_INCLUDE_FILENAME or CITATION_INCLUDE_DATE):
+                        try:
+                            footer_parts = []
+                            if CITATION_INCLUDE_FILENAME:
+                                footer_parts.append(f"Source: {input_file.name}")
+                            if CITATION_INCLUDE_DATE:
+                                from datetime import datetime
+                                footer_parts.append(datetime.now().strftime(CITATION_DATE_FORMAT))
+                            if footer_parts:
+                                headers = presentation.SlideMaster.HeadersFooters
+                                headers.Footer.Visible = True
+                                headers.Footer.Text = " | ".join(footer_parts)
+                        except Exception as e:
+                            self.logger.debug(f"Failed to annotate slide footer: {e}")
                     
                     # RAG Optimization: Add slide numbers for citation
                     if PPTX_ADD_SLIDE_NUMBERS:
