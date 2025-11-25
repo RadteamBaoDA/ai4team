@@ -18,6 +18,8 @@ from config.settings import (
     EXCEL_SINGLE_PAGE_THRESHOLD,
     EXCEL_MARGIN_INCHES,
     EXCEL_HEADER_MARGIN_INCHES,
+    EXCEL_PAGE_BREAK_ON_EMPTY_ROWS,
+    EXCEL_PAGE_BREAK_CHAR,
     MEMORY_OPTIMIZATION,
 )
 
@@ -321,31 +323,54 @@ class MSOfficeConverter(BaseConverter):
             page_setup.HeaderMargin = header_margin_pts
             page_setup.FooterMargin = header_margin_pts
             
-            # 5. Insert Page Breaks on Empty Rows (to separate sections)
+            # 5. Insert Page Breaks on Empty Rows or Special Characters
             # Only process if row count is manageable to avoid performance hit
-            if row_count < 10000: 
+            if row_count < 20000: 
                 values = used_range.Value
                 # values is a tuple of tuples for 2D range, or scalar for single cell
                 if isinstance(values, tuple):
-                    # Iterate to find empty rows
+                    consecutive_empty_rows = 0
+                    
+                    # Iterate to find empty rows or break chars
                     for i, row_data in enumerate(values):
                         # Skip first row (can't break before it)
                         if i == 0: continue
                         
-                        # Check if row is empty
-                        is_empty = True
-                        for cell_val in row_data:
-                            if cell_val is not None and str(cell_val).strip() != "":
-                                is_empty = False
-                                break
+                        is_row_empty = True
+                        has_break_char = False
                         
-                        if is_empty:
-                            # Add page break
-                            # Calculate actual row number
+                        # Check row content
+                        for cell_val in row_data:
+                            if cell_val is not None:
+                                str_val = str(cell_val).strip()
+                                if str_val != "":
+                                    is_row_empty = False
+                                    # Check for special break character
+                                    if EXCEL_PAGE_BREAK_CHAR and EXCEL_PAGE_BREAK_CHAR in str_val:
+                                        has_break_char = True
+                                        break
+                        
+                        # Handle explicit page break character
+                        if has_break_char:
                             current_row_num = first_row + i
-                            cell = sheet.Cells(current_row_num, 1)
                             try:
-                                sheet.HPageBreaks.Add(Before=cell)
+                                sheet.HPageBreaks.Add(Before=sheet.Cells(current_row_num, 1))
+                                consecutive_empty_rows = 0 # Reset counter
+                                continue
+                            except:
+                                pass
+
+                        # Handle empty row page breaks
+                        if is_row_empty:
+                            consecutive_empty_rows += 1
+                        else:
+                            consecutive_empty_rows = 0
+                        
+                        if EXCEL_PAGE_BREAK_ON_EMPTY_ROWS > 0 and consecutive_empty_rows == EXCEL_PAGE_BREAK_ON_EMPTY_ROWS:
+                            # Add page break
+                            current_row_num = first_row + i
+                            try:
+                                sheet.HPageBreaks.Add(Before=sheet.Cells(current_row_num, 1))
                             except:
                                 pass
                             

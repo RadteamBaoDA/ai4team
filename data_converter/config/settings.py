@@ -110,6 +110,12 @@ EXCEL_SINGLE_PAGE_THRESHOLD = _env_int('EXCEL_SINGLE_PAGE_THRESHOLD', 7)
 EXCEL_MARGIN_INCHES = _env_float('EXCEL_MARGIN_INCHES', 0.5)
 EXCEL_HEADER_MARGIN_INCHES = _env_float('EXCEL_HEADER_MARGIN_INCHES', 0.3)
 
+# Excel Page Break Configuration
+# Number of consecutive empty rows to trigger a page break (0 to disable)
+EXCEL_PAGE_BREAK_ON_EMPTY_ROWS = _env_int('EXCEL_PAGE_BREAK_ON_EMPTY_ROWS', 1)
+# Special character/string to trigger a page break (empty string to disable)
+EXCEL_PAGE_BREAK_CHAR = os.getenv('EXCEL_PAGE_BREAK_CHAR', '<<<PAGE_BREAK>>>')
+
 # LibreOffice command paths to try
 LIBREOFFICE_COMMANDS = [
     'libreoffice',
