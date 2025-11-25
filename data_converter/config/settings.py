@@ -41,7 +41,7 @@ DEFAULT_OUTPUT_DIR = BASE_DIR / "output"
 
 # Environment variables to control file conversion
 # Set to "false", "0", or "no" to copy files instead of converting (default: false)
-CONVERT_EXCEL_FILES = _env_bool('CONVERT_EXCEL_FILES', False)
+CONVERT_EXCEL_FILES = _env_bool('CONVERT_EXCEL_FILES', True)
 CONVERT_CSV_FILES = _env_bool('CONVERT_CSV_FILES', False)
 
 # Supported file extensions for conversion
@@ -95,7 +95,7 @@ SUPPORTED_EXTENSIONS = CONVERTIBLE_EXTENSIONS | COPY_EXTENSIONS
 CONVERSION_TIMEOUT = 120
 
 # Parallel processing configuration
-PARALLEL_MODE = _env_bool('PARALLEL_MODE', True)
+PARALLEL_MODE = _env_bool('PARALLEL_MODE', False)
 MAX_WORKERS = _env_int('MAX_WORKERS', None)  # None means auto-detect
 BATCH_SIZE = _env_int('BATCH_SIZE', 10)
 MEMORY_OPTIMIZATION = _env_bool('MEMORY_OPTIMIZATION', True)
@@ -103,9 +103,9 @@ MEMORY_OPTIMIZATION = _env_bool('MEMORY_OPTIMIZATION', True)
 USE_PROCESS_ISOLATION = _env_bool('USE_PROCESS_ISOLATION', True)
 
 # Excel PDF export tuning
-EXCEL_FORCE_SINGLE_PAGE = _env_bool('EXCEL_FORCE_SINGLE_PAGE', True)
+EXCEL_FORCE_SINGLE_PAGE = _env_bool('EXCEL_FORCE_SINGLE_PAGE', False)
 EXCEL_AUTO_LANDSCAPE = _env_bool('EXCEL_AUTO_LANDSCAPE', True)
-EXCEL_LIMIT_PRINT_AREA = _env_bool('EXCEL_LIMIT_PRINT_AREA', True)
+EXCEL_LIMIT_PRINT_AREA = _env_bool('EXCEL_LIMIT_PRINT_AREA', False)
 EXCEL_SINGLE_PAGE_THRESHOLD = _env_int('EXCEL_SINGLE_PAGE_THRESHOLD', 7)
 EXCEL_MARGIN_INCHES = _env_float('EXCEL_MARGIN_INCHES', 0.5)
 EXCEL_HEADER_MARGIN_INCHES = _env_float('EXCEL_HEADER_MARGIN_INCHES', 0.3)

@@ -224,7 +224,7 @@ class MSOfficeConverter(BaseConverter):
                     Filename=str(output_file.resolve()),
                     Quality=0,
                     IncludeDocProperties=True,
-                    IgnorePrintAreas=False,
+                    IgnorePrintAreas=True,
                     OpenAfterPublish=False
                 )
                 
@@ -273,73 +273,87 @@ class MSOfficeConverter(BaseConverter):
 
     def _prepare_excel_sheet(self, sheet, margin_pts: float, header_margin_pts: float) -> None:
         """Apply layout rules so PDF output is consistent and legible."""
-        bounds = self._get_sheet_bounds(sheet) if EXCEL_LIMIT_PRINT_AREA or EXCEL_FORCE_SINGLE_PAGE or EXCEL_AUTO_LANDSCAPE else None
-
-        if EXCEL_LIMIT_PRINT_AREA and bounds:
-            first_row, first_col, last_row, last_col = bounds
-            try:
-                address = sheet.Range(
-                    sheet.Cells(first_row, first_col),
-                    sheet.Cells(last_row, last_col)
-                ).Address
-                sheet.PageSetup.PrintArea = address
-            except Exception as print_error:
-                self.logger.debug(
-                    "Could not restrict print area for %s: %s",
-                    getattr(sheet, "Name", "<unknown>"),
-                    print_error,
-                )
-
-        column_count, row_count = (0, 0)
-        if bounds:
-            first_row, first_col, last_row, last_col = bounds
-            column_count = max(1, last_col - first_col + 1)
-            row_count = max(1, last_row - first_row + 1)
-
-        # Optional orientation adjustment
-        if EXCEL_AUTO_LANDSCAPE and bounds:
-            try:
-                orientation = XL_ORIENT_LANDSCAPE if column_count > row_count else XL_ORIENT_PORTRAIT
-                sheet.PageSetup.Orientation = orientation
-            except Exception as orientation_error:
-                self.logger.debug(
-                    "Orientation adjustment failed for %s: %s",
-                    getattr(sheet, "Name", "<unknown>"),
-                    orientation_error,
-                )
-
-        # Decide whether to force single page
-        should_force_single_page = EXCEL_FORCE_SINGLE_PAGE and (
-            not bounds or column_count > EXCEL_SINGLE_PAGE_THRESHOLD or row_count > EXCEL_SINGLE_PAGE_THRESHOLD
-        )
-
+        
+        # Constants
+        XL_PAPER_A4 = 9
+        XL_PAPER_A3 = 8
+        XL_ORIENT_PORTRAIT = 1
+        XL_ORIENT_LANDSCAPE = 2
+        
         try:
-            if should_force_single_page:
-                sheet.PageSetup.Zoom = False
-                sheet.PageSetup.FitToPagesWide = 1
-                sheet.PageSetup.FitToPagesTall = 1
-            else:
-                sheet.PageSetup.Zoom = True
-        except Exception as sizing_error:
-            self.logger.debug(
-                "Scaling adjustment failed for %s: %s",
-                getattr(sheet, "Name", "<unknown>"),
-                sizing_error,
-            )
+            # 1. Reset Page Breaks to clean up previous print settings
+            try:
+                sheet.ResetAllPageBreaks()
+            except:
+                pass
+            
+            # 2. Get UsedRange and Dimensions
+            used_range = sheet.UsedRange
+            total_width = used_range.Width
+            row_count = used_range.Rows.Count
+            first_row = used_range.Row
+            
+            page_setup = sheet.PageSetup
+            
+            # 3. Page Size & Orientation Strategy
+            # Adjust paper size and orientation based on content width to minimize scaling
+            # A4 width ~ 595 pts (portrait), 842 pts (landscape)
+            if total_width < 600: # Fits comfortably on A4 Portrait
+                page_setup.PaperSize = XL_PAPER_A4
+                page_setup.Orientation = XL_ORIENT_PORTRAIT
+            elif total_width < 850: # Fits on A4 Landscape
+                page_setup.PaperSize = XL_PAPER_A4
+                page_setup.Orientation = XL_ORIENT_LANDSCAPE
+            else: # Wide content, use A3 Landscape
+                page_setup.PaperSize = XL_PAPER_A3
+                page_setup.Orientation = XL_ORIENT_LANDSCAPE
 
-        # Apply consistent margins regardless of layout logic
-        try:
-            sheet.PageSetup.LeftMargin = margin_pts
-            sheet.PageSetup.RightMargin = margin_pts
-            sheet.PageSetup.TopMargin = margin_pts
-            sheet.PageSetup.BottomMargin = margin_pts
-            sheet.PageSetup.HeaderMargin = header_margin_pts
-            sheet.PageSetup.FooterMargin = header_margin_pts
-        except Exception as margin_error:
+            # 4. Fit all columns on one page width
+            page_setup.Zoom = False
+            page_setup.FitToPagesWide = 1
+            page_setup.FitToPagesTall = False # Allow vertical scrolling for long content
+            
+            # Margins
+            page_setup.LeftMargin = margin_pts
+            page_setup.RightMargin = margin_pts
+            page_setup.TopMargin = margin_pts
+            page_setup.BottomMargin = margin_pts
+            page_setup.HeaderMargin = header_margin_pts
+            page_setup.FooterMargin = header_margin_pts
+            
+            # 5. Insert Page Breaks on Empty Rows (to separate sections)
+            # Only process if row count is manageable to avoid performance hit
+            if row_count < 10000: 
+                values = used_range.Value
+                # values is a tuple of tuples for 2D range, or scalar for single cell
+                if isinstance(values, tuple):
+                    # Iterate to find empty rows
+                    for i, row_data in enumerate(values):
+                        # Skip first row (can't break before it)
+                        if i == 0: continue
+                        
+                        # Check if row is empty
+                        is_empty = True
+                        for cell_val in row_data:
+                            if cell_val is not None and str(cell_val).strip() != "":
+                                is_empty = False
+                                break
+                        
+                        if is_empty:
+                            # Add page break
+                            # Calculate actual row number
+                            current_row_num = first_row + i
+                            cell = sheet.Cells(current_row_num, 1)
+                            try:
+                                sheet.HPageBreaks.Add(Before=cell)
+                            except:
+                                pass
+                            
+        except Exception as e:
             self.logger.debug(
-                "Margin adjustment failed for %s: %s",
+                "Page setup failed for %s: %s",
                 getattr(sheet, "Name", "<unknown>"),
-                margin_error,
+                e,
             )
 
     def _get_sheet_bounds(self, sheet):
