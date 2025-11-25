@@ -4,6 +4,7 @@ Microsoft Office converter implementation
 
 import subprocess
 import platform
+import gc
 from pathlib import Path
 from threading import Lock
 from .base_converter import BaseConverter
@@ -17,6 +18,7 @@ from config.settings import (
     EXCEL_SINGLE_PAGE_THRESHOLD,
     EXCEL_MARGIN_INCHES,
     EXCEL_HEADER_MARGIN_INCHES,
+    MEMORY_OPTIMIZATION,
 )
 
 
@@ -86,17 +88,53 @@ class MSOfficeConverter(BaseConverter):
             doc = None
             
             try:
-                word = win32com.client.Dispatch("Word.Application")
+                # Use DispatchEx to force a new instance for better isolation
+                word = win32com.client.DispatchEx("Word.Application")
                 word.Visible = False
+                word.ScreenUpdating = False
                 
                 doc = word.Documents.Open(str(input_file.resolve()))
-                doc.SaveAs(str(output_file.resolve()), FileFormat=17)  # 17 = wdFormatPDF
-                doc.Close()
+                
+                # Set encoding to UTF-8 to fix font/encoding issues
+                try:
+                    doc.WebOptions.Encoding = 65001
+                except:
+                    pass
+
+                # Try to set embedding option
+                try:
+                    doc.EmbedTrueTypeFonts = True
+                except:
+                    pass
+
+                # Use ExportAsFixedFormat instead of SaveAs for better PDF control
+                # 17 = wdExportFormatPDF
+                doc.ExportAsFixedFormat(
+                    OutputFileName=str(output_file.resolve()),
+                    ExportFormat=17,
+                    OpenAfterExport=False,
+                    OptimizeFor=0, # wdExportOptimizeForPrint
+                    Range=0, # wdExportAllDocument
+                    Item=0, # wdExportDocumentContent
+                    IncludeDocProps=True,
+                    KeepIRM=True,
+                    CreateBookmarks=1, # wdExportCreateHeadingBookmarks
+                    DocStructureTags=True,
+                    BitmapMissingFonts=True,
+                    UseISO19005_1=True # PDF/A compliant (forces font embedding)
+                )
+                
+                doc.Close(SaveChanges=False)
+                del doc
                 doc = None
                 
                 word.Quit()
+                del word
                 word = None
                 
+                if MEMORY_OPTIMIZATION:
+                    gc.collect()
+
                 return True
                 
             except Exception:
@@ -106,11 +144,15 @@ class MSOfficeConverter(BaseConverter):
                         doc.Close(SaveChanges=False)
                     except:
                         pass
+                    del doc
                 if word:
                     try:
                         word.Quit()
                     except:
                         pass
+                    del word
+                if MEMORY_OPTIMIZATION:
+                    gc.collect()
                 raise
                 
         except ImportError:
@@ -141,11 +183,20 @@ class MSOfficeConverter(BaseConverter):
             workbook = None
             
             try:
-                excel = win32com.client.Dispatch("Excel.Application")
+                # Use DispatchEx to force a new instance for better isolation
+                excel = win32com.client.DispatchEx("Excel.Application")
                 excel.Visible = False
                 excel.DisplayAlerts = False
+                excel.ScreenUpdating = False
                 
                 workbook = excel.Workbooks.Open(str(input_file.resolve()))
+                
+                # Set encoding to UTF-8
+                try:
+                    workbook.WebOptions.Encoding = 65001
+                except:
+                    pass
+
                 # Force worksheets to a consistent layout before exporting
                 margin = excel.Application.InchesToPoints(EXCEL_MARGIN_INCHES)
                 header_margin = excel.Application.InchesToPoints(EXCEL_HEADER_MARGIN_INCHES)
@@ -165,13 +216,29 @@ class MSOfficeConverter(BaseConverter):
                             getattr(sheet, "Name", "<unknown>"),
                             prep_error,
                         )
-                workbook.ExportAsFixedFormat(0, str(output_file.resolve()))  # 0 = xlTypePDF
+                
+                # 0 = xlTypePDF
+                # 0 = xlQualityStandard
+                workbook.ExportAsFixedFormat(
+                    Type=0, 
+                    Filename=str(output_file.resolve()),
+                    Quality=0,
+                    IncludeDocProperties=True,
+                    IgnorePrintAreas=False,
+                    OpenAfterPublish=False
+                )
+                
                 workbook.Close(SaveChanges=False)
+                del workbook
                 workbook = None
                 
                 excel.Quit()
+                del excel
                 excel = None
                 
+                if MEMORY_OPTIMIZATION:
+                    gc.collect()
+
                 return True
                 
             except Exception:
@@ -181,11 +248,15 @@ class MSOfficeConverter(BaseConverter):
                         workbook.Close(SaveChanges=False)
                     except:
                         pass
+                    del workbook
                 if excel:
                     try:
                         excel.Quit()
                     except:
                         pass
+                    del excel
+                if MEMORY_OPTIMIZATION:
+                    gc.collect()
                 raise
                 
         except ImportError:
@@ -327,7 +398,8 @@ class MSOfficeConverter(BaseConverter):
                 
                 try:
                     # Create PowerPoint application
-                    powerpoint = win32com.client.Dispatch("PowerPoint.Application")
+                    # Use DispatchEx to force a new instance for better isolation
+                    powerpoint = win32com.client.DispatchEx("PowerPoint.Application")
                     
                     # Open presentation with minimal settings
                     presentation = powerpoint.Presentations.Open(
@@ -338,13 +410,19 @@ class MSOfficeConverter(BaseConverter):
                     )
                     
                     # Save as PDF (format 32 = ppSaveAsPDF)
-                    presentation.SaveAs(str(output_file.resolve()), 32)
+                    # Third arg is EmbedTrueTypeFonts (-1 = msoTrue)
+                    presentation.SaveAs(str(output_file.resolve()), 32, -1)
                     presentation.Close()
+                    del presentation
                     presentation = None
                     
                     powerpoint.Quit()
+                    del powerpoint
                     powerpoint = None
                     
+                    if MEMORY_OPTIMIZATION:
+                        gc.collect()
+
                     # Brief delay to let PowerPoint fully terminate before next thread
                     import time
                     time.sleep(0.2)
@@ -358,11 +436,15 @@ class MSOfficeConverter(BaseConverter):
                             presentation.Close()
                         except:
                             pass
+                        del presentation
                     if powerpoint:
                         try:
                             powerpoint.Quit()
                         except:
                             pass
+                        del powerpoint
+                    if MEMORY_OPTIMIZATION:
+                        gc.collect()
                     # Re-raise to be caught by outer exception handler
                     raise
                     

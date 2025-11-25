@@ -3,6 +3,7 @@ LibreOffice converter implementation
 """
 
 import subprocess
+import tempfile
 from pathlib import Path
 from .base_converter import BaseConverter
 from config.settings import LIBREOFFICE_COMMANDS, CONVERSION_TIMEOUT
@@ -51,20 +52,34 @@ class LibreOfficeConverter(BaseConverter):
         try:
             output_dir = output_file.parent
             
-            # Convert to PDF using LibreOffice
-            result = subprocess.run(
-                [self._command, '--headless', '--convert-to', 'pdf', 
-                 '--outdir', str(output_dir), str(input_file)],
-                capture_output=True,
-                timeout=CONVERSION_TIMEOUT
-            )
-            
-            if result.returncode == 0:
-                # LibreOffice creates file with same name but .pdf extension
-                generated_pdf = output_dir / (input_file.stem + '.pdf')
-                if generated_pdf.exists() and generated_pdf != output_file:
-                    generated_pdf.rename(output_file)
-                return True
+            # Create a temporary directory for the user profile to avoid lock issues in parallel mode
+            with tempfile.TemporaryDirectory() as temp_profile_dir:
+                # Format path for LibreOffice URL (forward slashes)
+                user_installation_url = f"file:///{str(Path(temp_profile_dir).as_posix())}"
+                
+                # Convert to PDF using LibreOffice
+                # Added -env:UserInstallation to support parallel execution
+                cmd = [
+                    self._command, 
+                    f'-env:UserInstallation={user_installation_url}',
+                    '--headless', 
+                    '--convert-to', 'pdf', 
+                    '--outdir', str(output_dir), 
+                    str(input_file)
+                ]
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=CONVERSION_TIMEOUT
+                )
+                
+                if result.returncode == 0:
+                    # LibreOffice creates file with same name but .pdf extension
+                    generated_pdf = output_dir / (input_file.stem + '.pdf')
+                    if generated_pdf.exists() and generated_pdf != output_file:
+                        generated_pdf.rename(output_file)
+                    return True
             
             return False
             

@@ -7,11 +7,12 @@ import os
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
 from threading import Lock
 from .converters import ConverterFactory
 from .utils import setup_logger, FileScanner
 from .utils.file_hash import should_skip_conversion, should_skip_copy
-from config.settings import DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR
+from config.settings import DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR, USE_PROCESS_ISOLATION
 
 # Optional progress bar support
 try:
@@ -43,6 +44,56 @@ except ImportError:
             self.desc = desc
 
 
+def _process_file_isolated(args):
+    """
+    Standalone worker function for process isolation.
+    Must be at module level to be picklable.
+    
+    Args:
+        args: Tuple of (input_file, input_dir, output_dir, operation)
+    
+    Returns:
+        Tuple of (success, operation, input_file)
+    """
+    input_file, input_dir, output_dir, operation = args
+    
+    # Re-initialize components inside the process
+    scanner = FileScanner(input_dir)
+    output_file = scanner.get_output_path(input_file, input_dir, output_dir)
+    
+    if operation == 'copy':
+        # Copy logic
+        output_file = output_file.with_suffix(input_file.suffix)
+        if should_skip_copy(input_file, output_file):
+            return True, operation, input_file
+            
+        import shutil
+        try:
+            shutil.copy2(input_file, output_file)
+            return True, operation, input_file
+        except:
+            return False, operation, input_file
+            
+    else: # convert
+        if should_skip_conversion(input_file, output_file):
+            return True, operation, input_file
+            
+        factory = ConverterFactory()
+        converters = factory.get_converters_for_file(input_file)
+        
+        if not converters:
+            return False, operation, input_file
+            
+        for converter in converters:
+            try:
+                if converter.convert(input_file, output_file):
+                    return True, operation, input_file
+            except:
+                continue
+                
+        return False, operation, input_file
+
+
 class DocumentConverter:
     """Handles conversion of Office documents to PDF format with parallel processing
     
@@ -57,7 +108,8 @@ class DocumentConverter:
     def __init__(self, input_dir: Optional[str] = None, output_dir: Optional[str] = None, 
                  max_workers: Optional[int] = None, enable_parallel: bool = True,
                  enable_progress_bar: bool = True, adaptive_workers: bool = True,
-                 priority_large_files: bool = True, batch_small_files: bool = True):
+                 priority_large_files: bool = True, batch_small_files: bool = True,
+                 batch_size: int = 10):
         """
         Initialize the converter
         
@@ -70,6 +122,7 @@ class DocumentConverter:
             adaptive_workers: Adjust worker count based on file sizes (default: True)
             priority_large_files: Process large files first (default: True)
             batch_small_files: Group small files for efficiency (default: True)
+            batch_size: Number of files to process in a batch (default: 10)
         """
         # Use default directories if not provided
         if input_dir is None:
@@ -102,6 +155,7 @@ class DocumentConverter:
         self.adaptive_workers = adaptive_workers
         self.priority_large_files = priority_large_files
         self.batch_small_files = batch_small_files
+        self.batch_size = batch_size
         
         # File size thresholds (in bytes)
         self.SMALL_FILE_THRESHOLD = 100 * 1024  # 100KB
@@ -425,7 +479,7 @@ class DocumentConverter:
         stats: dict,
         worker_count: int,
     ):
-        """Parallel processing of files using ThreadPoolExecutor with v2.5 enhancements"""
+        """Parallel processing of files using ThreadPoolExecutor or ProcessPool"""
         # Prepare work items with priority sorting
         work_items = self._sort_by_priority(files_to_convert, files_to_copy)
         
@@ -445,48 +499,97 @@ class DocumentConverter:
                 bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
             )
 
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            # Submit all tasks
-            future_to_file = {
-                executor.submit(self._process_file_wrapper, item): item 
-                for item in work_items
-            }
+        # Process in batches to manage memory usage
+        batch_size = self.batch_size if self.batch_small_files else total_items
+        
+        for i in range(0, total_items, batch_size):
+            batch = work_items[i:i + batch_size]
             
-            # Collect results as they complete
-            for future in as_completed(future_to_file):
-                item = future_to_file[future]
-                file_path, operation = item
+            if USE_PROCESS_ISOLATION:
+                # Use multiprocessing with maxtasksperchild=1 to ensure memory is freed
+                # and processes are recycled after each task
                 
-                try:
-                    success, op_type, processed_file = future.result()
-                    
-                    # Thread-safe statistics update
-                    with self.stats_lock:
-                        if success:
-                            if op_type == 'convert':
-                                stats['converted'] += 1
+                # Prepare args for standalone worker
+                process_args = [
+                    (item[0], self.input_dir, self.output_dir, item[1]) 
+                    for item in batch
+                ]
+                
+                with multiprocessing.Pool(processes=worker_count, maxtasksperchild=1) as pool:
+                    # Map tasks to pool
+                    results = []
+                    for result in pool.imap_unordered(_process_file_isolated, process_args):
+                        results.append(result)
+                        
+                        success, op_type, processed_file = result
+                        
+                        # Thread-safe statistics update
+                        with self.stats_lock:
+                            if success:
+                                if op_type == 'convert':
+                                    stats['converted'] += 1
+                                else:
+                                    stats['copied'] += 1
                             else:
-                                stats['copied'] += 1
-                        else:
-                            stats['failed'] += 1
-                            stats['failed_files'].append(str(processed_file))
+                                stats['failed'] += 1
+                                stats['failed_files'].append(str(processed_file))
+                        
+                        # Update progress bar
+                        if progress_bar:
+                            progress_bar.update(1)
+                            if success:
+                                progress_bar.set_description(f"✓ {processed_file.name[:30]}")
+                            else:
+                                progress_bar.set_description(f"✗ {processed_file.name[:30]}")
+
+            else:
+                # Use ThreadPoolExecutor (existing logic)
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    # Submit batch tasks
+                    future_to_file = {
+                        executor.submit(self._process_file_wrapper, item): item 
+                        for item in batch
+                    }
                     
-                    # Update progress bar
-                    if progress_bar:
-                        progress_bar.update(1)
-                        if success:
-                            progress_bar.set_description(f"✓ {file_path.name[:30]}")
-                        else:
-                            progress_bar.set_description(f"✗ {file_path.name[:30]}")
+                    # Collect results as they complete
+                    for future in as_completed(future_to_file):
+                        item = future_to_file[future]
+                        file_path, operation = item
+                        
+                        try:
+                            success, op_type, processed_file = future.result()
                             
-                except Exception as e:
-                    self.logger.error(f"Unexpected error processing {file_path.name}: {e}")
-                    with self.stats_lock:
-                        stats['failed'] += 1
-                        stats['failed_files'].append(str(file_path))
-                    
-                    if progress_bar:
-                        progress_bar.update(1)
+                            # Thread-safe statistics update
+                            with self.stats_lock:
+                                if success:
+                                    if op_type == 'convert':
+                                        stats['converted'] += 1
+                                    else:
+                                        stats['copied'] += 1
+                                else:
+                                    stats['failed'] += 1
+                                    stats['failed_files'].append(str(processed_file))
+                            
+                            # Update progress bar
+                            if progress_bar:
+                                progress_bar.update(1)
+                                if success:
+                                    progress_bar.set_description(f"✓ {file_path.name[:30]}")
+                                else:
+                                    progress_bar.set_description(f"✗ {file_path.name[:30]}")
+                                    
+                        except Exception as e:
+                            self.logger.error(f"Unexpected error processing {file_path.name}: {e}")
+                            with self.stats_lock:
+                                stats['failed'] += 1
+                                stats['failed_files'].append(str(file_path))
+                            
+                            if progress_bar:
+                                progress_bar.update(1)
+            
+            # Explicit garbage collection after each batch
+            import gc
+            gc.collect()
         
         # Close progress bar
         if progress_bar:

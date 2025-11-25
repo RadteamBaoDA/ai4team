@@ -94,6 +94,14 @@ SUPPORTED_EXTENSIONS = CONVERTIBLE_EXTENSIONS | COPY_EXTENSIONS
 # Conversion timeout (seconds)
 CONVERSION_TIMEOUT = 120
 
+# Parallel processing configuration
+PARALLEL_MODE = _env_bool('PARALLEL_MODE', True)
+MAX_WORKERS = _env_int('MAX_WORKERS', None)  # None means auto-detect
+BATCH_SIZE = _env_int('BATCH_SIZE', 10)
+MEMORY_OPTIMIZATION = _env_bool('MEMORY_OPTIMIZATION', True)
+# Use process isolation (multiprocessing) instead of threads for better memory management and stability
+USE_PROCESS_ISOLATION = _env_bool('USE_PROCESS_ISOLATION', True)
+
 # Excel PDF export tuning
 EXCEL_FORCE_SINGLE_PAGE = _env_bool('EXCEL_FORCE_SINGLE_PAGE', True)
 EXCEL_AUTO_LANDSCAPE = _env_bool('EXCEL_AUTO_LANDSCAPE', True)

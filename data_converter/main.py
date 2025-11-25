@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.document_converter import DocumentConverter
-
+from config.settings import PARALLEL_MODE, MAX_WORKERS, BATCH_SIZE
 
 
 def main():
@@ -50,9 +50,20 @@ def main():
     
     try:
         # Create converter with parallel processing enabled
-        converter = DocumentConverter(input_dir, output_dir, enable_parallel=True)
+        converter = DocumentConverter(
+            input_dir, 
+            output_dir, 
+            enable_parallel=PARALLEL_MODE,
+            max_workers=MAX_WORKERS,
+            batch_small_files=(BATCH_SIZE > 0),
+            batch_size=BATCH_SIZE
+        )
         
-        print("\nStarting conversion with parallel processing...\n")
+        if PARALLEL_MODE:
+            print("\nStarting conversion with parallel processing...\n")
+        else:
+            print("\nStarting conversion with sequential processing...\n")
+
         stats = converter.convert_all()
         
         # Print summary
