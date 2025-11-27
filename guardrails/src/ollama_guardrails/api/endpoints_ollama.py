@@ -15,7 +15,7 @@ import asyncio
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 
 from ..middleware.http_client import forward_request, safe_json, get_http_client
 from ..utils import (
@@ -48,6 +48,14 @@ def create_ollama_endpoints(config, guard_manager, concurrency_manager):
     # Import streaming handlers
     from .streaming_handlers import create_streaming_handlers
     stream_response_with_guard = create_streaming_handlers(config, guard_manager)
+
+    @router.get("/")
+    async def healthcheck():
+        """Health check endpoint - forwards to Ollama's root endpoint."""
+        resp, err = await forward_request(config, '/', payload=None, stream=False, timeout=10)
+        if err:
+            return PlainTextResponse(content="Ollama service unavailable", status_code=500, media_type="text/plain")
+        return PlainTextResponse(content=resp.text, status_code=resp.status_code, media_type="text/plain")
 
     def _inline_generate_guard_response(
         model_name: Optional[str],
