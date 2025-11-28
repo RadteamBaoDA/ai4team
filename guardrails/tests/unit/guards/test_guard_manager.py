@@ -82,17 +82,15 @@ def test_count_tokens_uses_stub_encoder(monkeypatch):
         def encode(self, text):
             return list(text)
 
-    class DummyTiktoken:
-        def get_encoding(self, name):
-            return DummyEncoder()
-
-    monkeypatch.setattr(guard_manager, "tiktoken", DummyTiktoken())
     manager = guard_manager.LLMGuardManager(enable_input=False, enable_output=False)
+    # Directly set the encoder to bypass tiktoken import
+    manager._token_encoder = DummyEncoder()
     assert manager._count_tokens("tokens") == 6
 
 
 def test_ensure_input_scanners_initialized_creates_vault(stub_guard_env):
-    manager = guard_manager.LLMGuardManager(enable_input=True, enable_output=False, lazy_init=True)
+    # enable_anonymize=True is required for vault to be created
+    manager = guard_manager.LLMGuardManager(enable_input=True, enable_output=False, enable_anonymize=True, lazy_init=True)
     manager._ensure_input_scanners_initialized()
     assert manager._input_scanners_initialized is True
     assert manager.vault is not None

@@ -56,11 +56,6 @@ DEFAULT_CONFIG = {
 }
 
 
-class ImmediateConcurrencyManager:
-    async def execute(self, model_name, request_id, coro, timeout):
-        return await coro
-
-
 class DummyGuardManager:
     def __init__(self, input_results=None, output_results=None):
         self.input_results = list(input_results or [])
@@ -118,7 +113,6 @@ def _make_test_client(monkeypatch, guard_manager, http_client=None, overrides=No
     router = module.create_openai_endpoints(
         config=config,
         guard_manager=guard_manager,
-        concurrency_manager=ImmediateConcurrencyManager(),
     )
 
     app = FastAPI()

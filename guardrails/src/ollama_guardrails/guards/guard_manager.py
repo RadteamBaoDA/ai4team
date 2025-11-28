@@ -93,7 +93,7 @@ class LLMGuardManager:
         self,
         enable_input: bool = True,
         enable_output: bool = True,
-        enable_anonymize: bool = True,
+        enable_anonymize: bool = False,
         lazy_init: bool = True,
         enable_input_code_scanner: Optional[bool] = False,
         input_scanners_config: Optional[Dict[str, Any]] = None,

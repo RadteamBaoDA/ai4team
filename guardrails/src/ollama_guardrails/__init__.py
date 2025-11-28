@@ -3,11 +3,9 @@ Ollama Guardrails - Advanced LLM Guard Proxy for Ollama
 
 A comprehensive security proxy for Ollama that provides:
 - Input/Output scanning with LLM Guard  
-- IP whitelisting and access control
 - Streaming response support
-- Performance monitoring and caching
 - OpenAI API compatibility
-- Modern Python 3.9+ async architecture
+- Modern Python 3.9+ async architecture (FastAPI native async handling)
 
 Usage:
     Basic server:

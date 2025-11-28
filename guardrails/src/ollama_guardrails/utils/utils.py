@@ -3,30 +3,12 @@ Utility functions for Ollama Guard Proxy.
 
 Contains helper functions for request/response processing:
 - Text extraction from payloads and responses
-- Client IP extraction
 - Message text combining
 - OpenAI to Ollama parameter mapping
 """
 
 import logging
 from typing import Dict, Any, Iterable, List, Optional
-
-
-def extract_client_ip(request) -> str:
-    """Extract client IP from request, preferring X-Forwarded-For then X-Real-IP.
-
-    Returns a string IP (or '0.0.0.0' if unknown).
-    """
-    xfwd = request.headers.get('x-forwarded-for')
-    if xfwd:
-        # X-Forwarded-For may contain a list of IPs: client, proxy1, proxy2
-        return xfwd.split(',')[0].strip()
-
-    xreal = request.headers.get('x-real-ip')
-    if xreal:
-        return xreal.strip()
-
-    return request.client.host if request.client else '0.0.0.0'
 
 
 def extract_model_from_payload(payload: Dict[str, Any]) -> str:

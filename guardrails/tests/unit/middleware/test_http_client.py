@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from ollama_guardrails.middleware import http_client, ip_whitelist
+from ollama_guardrails.middleware import http_client
 
 
 class DummyConfig(dict):
@@ -216,20 +216,3 @@ async def test_forward_request_handles_http_error(monkeypatch):
     )
     assert resp is None
     assert "boom" in err
-
-
-def test_ip_whitelist_allows_exact_and_cidr():
-    whitelist = ip_whitelist.IPWhitelist(["10.0.0.1", "192.168.0.0/30", "bad"])
-    assert whitelist.enabled is True
-    assert whitelist.is_allowed("10.0.0.1") is True
-    assert whitelist.is_allowed("192.168.0.2") is True
-    assert whitelist.is_allowed("8.8.8.8") is False
-    assert whitelist.is_allowed("invalid") is False
-    stats = whitelist.get_stats()
-    assert stats["count"] == 2
-
-
-def test_ip_whitelist_disabled_allows_all():
-    whitelist = ip_whitelist.IPWhitelist()
-    assert whitelist.is_allowed("1.1.1.1") is True
-    assert whitelist.get_stats()["enabled"] is False
