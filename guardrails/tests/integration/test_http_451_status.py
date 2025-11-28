@@ -9,12 +9,10 @@ from pathlib import Path
 import sys
 
 # Add src directory to path to import modules
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from endpoints_ollama import create_ollama_endpoints
-from config import Config
-from guard_manager import GuardManager
-from concurrency import ConcurrencyManager
+from ollama_guardrails.api.endpoints_ollama import create_ollama_endpoints
+from ollama_guardrails.core.config import Config
 
 
 class MockGuardManager:
@@ -86,9 +84,8 @@ async def test_http_451_status_codes():
     # Setup mock objects
     config = MockConfig()
     guard_manager = MockGuardManager()
-    concurrency_manager = ConcurrencyManager(config)
     # Create router with endpoints
-    router = create_ollama_endpoints(config, guard_manager, concurrency_manager)
+    router = create_ollama_endpoints(config, guard_manager)
     
     # Test data
     test_payload = {

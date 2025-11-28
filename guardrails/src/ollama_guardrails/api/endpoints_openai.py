@@ -12,7 +12,6 @@ import json
 import logging
 import time
 import uuid
-import asyncio
 from typing import Dict, Any
 
 from fastapi import APIRouter, Request, HTTPException
@@ -36,14 +35,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def create_openai_endpoints(config, guard_manager, concurrency_manager):
+def create_openai_endpoints(config, guard_manager):
     """
     Create OpenAI-compatible endpoints with dependency injection.
     
     Args:
         config: Configuration object
         guard_manager: LLM Guard manager instance
-        concurrency_manager: Concurrency manager instance
     """
     
     # Import streaming handlers
@@ -194,222 +192,197 @@ def create_openai_endpoints(config, guard_manager, concurrency_manager):
 
         is_stream = bool(payload.get('stream', False))
         inline_guard = inline_guard_errors_enabled(config)
-
-        # Generate request ID
-        request_id = f"oai-chat-{uuid.uuid4().hex[:8]}"
         
         prompt_text = combine_messages_text(messages, roles=('user',), latest_only=True)
         detected_lang = LanguageDetector.detect_language(prompt_text)
 
-        # Define processing coroutine
-        async def process_openai_chat():
-            if config.get('enable_input_guard', True) and prompt_text:
-                input_result = await guard_manager.scan_input(
-                    prompt_text,
-                    block_on_error=config.get('block_on_guard_error', False)
-                )
-                if not input_result.get('allowed', True):
-                    logger.warning("OpenAI input blocked by LLM Guard: %s", input_result)
+        if config.get('enable_input_guard', True) and prompt_text:
+            input_result = await guard_manager.scan_input(
+                prompt_text,
+                block_on_error=config.get('block_on_guard_error', False)
+            )
+            if not input_result.get('allowed', True):
+                logger.warning("OpenAI input blocked by LLM Guard: %s", input_result)
 
-                    failed_scanners = extract_failed_scanners(input_result)
-                    reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners]) if failed_scanners else None
-                    error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
+                failed_scanners = extract_failed_scanners(input_result)
+                reason = ', '.join([f"{s['scanner']}: {s['reason']}" for s in failed_scanners]) if failed_scanners else None
+                error_message = LanguageDetector.get_error_message('prompt_blocked', detected_lang, reason)
 
-                    if inline_guard:
-                        markdown_message = format_markdown_error("Input blocked", error_message, failed_scanners)
-                        guard_payload = {
-                            "failed_scanners": failed_scanners,
-                            "type": "input_blocked",
-                            "language": detected_lang,
-                            "usage": _zero_usage(),
-                        }
-                        return _inline_chat_guard_response(model, markdown_message, is_stream, guard_payload)
-
-                    raise HTTPException(
-                        status_code=451,
-                        detail=error_message,
-                        headers={
-                            "X-Error-Type": "content_policy_violation",
-                            "X-Block-Type": "input_blocked",
-                            "X-Language": detected_lang,
-                            "X-Failed-Scanners": json.dumps(failed_scanners)
-                        }
-                    )
-
-            ollama_payload: Dict[str, Any] = {
-                "model": model,
-                "messages": messages,
-                "stream": bool(payload.get('stream', False))
-            }
-
-            options = build_ollama_options_from_openai_payload(payload)
-            if options:
-                ollama_payload['options'] = options
-
-            if isinstance(payload.get('tools'), list):
-                ollama_payload['tools'] = payload['tools']
-            if isinstance(payload.get('functions'), list):
-                ollama_payload['functions'] = payload['functions']
-
-            ollama_url = config.get('ollama_url')
-            url = f"{ollama_url.rstrip('/')}/api/chat"
-            is_stream = bool(payload.get('stream'))
-
-            try:
-                client = get_http_client()
-                timeout = config.get('openai_timeout', 300)
-                if is_stream:
-                    # For streaming, pass the stream directly to the handler
-                    async def stream_wrapper():
-                        async with client.stream("POST", url, json=ollama_payload, timeout=timeout) as response:
-                            if response.status_code != 200:
-                                logger.error("OpenAI upstream returned %s", response.status_code)
-                                try:
-                                    upstream_detail = response.json()
-                                except Exception:
-                                    upstream_detail = {"error": response.text}
-                                raise HTTPException(status_code=response.status_code, detail=upstream_detail)
-                            
-                            async for chunk in stream_openai_chat_response(response, guard_manager, config, model, detected_lang):
-                                yield chunk
-                    
-                    return StreamingResponse(
-                        stream_wrapper(),
-                        media_type="text/event-stream"
-                    )
-                else:
-                    response = await client.post(url, json=ollama_payload, timeout=timeout)
-                    
-                    if response.status_code != 200:
-                        logger.error("OpenAI upstream returned %s", response.status_code)
-                        try:
-                            upstream_detail = response.json()
-                        except Exception:
-                            upstream_detail = {"error": response.text}
-                        raise HTTPException(status_code=response.status_code, detail=upstream_detail)
-            except Exception as exc:
-                logger.error("OpenAI upstream error: %s", exc)
-                error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
-                raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
-
-            if is_stream:
-                # This shouldn't be reached due to early return above
-                pass
-
-            try:
-                data = response.json()
-            except Exception as exc:
-                logger.error("Failed to parse OpenAI upstream response: %s", exc)
-                error_message = LanguageDetector.get_error_message('server_error', detected_lang)
-                # Close connection before raising exception
-                try:
-                    await response.aclose()
-                except Exception:
-                    pass
-                raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
-
-            usage = _zero_usage()
-            output_text = ""
-            if isinstance(data, dict):
-                usage = {
-                    "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
-                    "completion_tokens": int(data.get('eval_count', 0) or 0)
-                }
-                usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
-
-                message = data.get('message')
-                if isinstance(message, dict):
-                    output_text = message.get('content', '')
-
-            if config.get('enable_output_guard', True) and output_text:
-                output_result = await guard_manager.scan_output(
-                    output_text,
-                    prompt=prompt_text,
-                    block_on_error=config.get('block_on_guard_error', False)
-                )
-
-                if not output_result.get('allowed', True):
-                    logger.warning("OpenAI output blocked by LLM Guard: %s", output_result)
-
-                    # Explicitly close response to free resources immediately
-                    try:
-                        await response.aclose()
-                        logger.info("Connection closed after blocking OpenAI non-streaming output")
-                    except Exception as e:
-                        logger.debug(f"Error closing connection: {e}")
-
-                    failed_scanners = extract_failed_scanners(output_result)
-                    error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
-
+                if inline_guard:
+                    markdown_message = format_markdown_error("Input blocked", error_message, failed_scanners)
                     guard_payload = {
                         "failed_scanners": failed_scanners,
-                        "type": "output_blocked",
+                        "type": "input_blocked",
                         "language": detected_lang,
-                        "usage": usage,
+                        "usage": _zero_usage(),
                     }
+                    return _inline_chat_guard_response(model, markdown_message, is_stream, guard_payload)
 
-                    if inline_guard:
-                        markdown_message = format_markdown_error("Response blocked", error_message, failed_scanners)
-                        return _inline_chat_guard_response(model, markdown_message, False, guard_payload)
+                raise HTTPException(
+                    status_code=451,
+                    detail=error_message,
+                    headers={
+                        "X-Error-Type": "content_policy_violation",
+                        "X-Block-Type": "input_blocked",
+                        "X-Language": detected_lang,
+                        "X-Failed-Scanners": json.dumps(failed_scanners)
+                    }
+                )
 
-                    raise HTTPException(
-                        status_code=451,
-                        detail=error_message,
-                        headers={
-                            "X-Error-Type": "content_policy_violation",
-                            "X-Block-Type": "output_blocked",
-                            "X-Language": detected_lang,
-                            "X-Failed-Scanners": json.dumps(failed_scanners)
-                        }
-                    )
-            
-            # Close connection after successful processing
+        ollama_payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": bool(payload.get('stream', False))
+        }
+
+        options = build_ollama_options_from_openai_payload(payload)
+        if options:
+            ollama_payload['options'] = options
+
+        if isinstance(payload.get('tools'), list):
+            ollama_payload['tools'] = payload['tools']
+        if isinstance(payload.get('functions'), list):
+            ollama_payload['functions'] = payload['functions']
+
+        ollama_url = config.get('ollama_url')
+        url = f"{ollama_url.rstrip('/')}/api/chat"
+
+        try:
+            client = get_http_client()
+            timeout = config.get('openai_timeout', 300)
+            if is_stream:
+                # For streaming, pass the stream directly to the handler
+                async def stream_wrapper():
+                    async with client.stream("POST", url, json=ollama_payload, timeout=timeout) as response:
+                        if response.status_code != 200:
+                            logger.error("OpenAI upstream returned %s", response.status_code)
+                            try:
+                                upstream_detail = response.json()
+                            except Exception:
+                                upstream_detail = {"error": response.text}
+                            raise HTTPException(status_code=response.status_code, detail=upstream_detail)
+                        
+                        async for chunk in stream_openai_chat_response(response, guard_manager, config, model, detected_lang):
+                            yield chunk
+                
+                return StreamingResponse(
+                    stream_wrapper(),
+                    media_type="text/event-stream"
+                )
+            else:
+                response = await client.post(url, json=ollama_payload, timeout=timeout)
+                
+                if response.status_code != 200:
+                    logger.error("OpenAI upstream returned %s", response.status_code)
+                    try:
+                        upstream_detail = response.json()
+                    except Exception:
+                        upstream_detail = {"error": response.text}
+                    raise HTTPException(status_code=response.status_code, detail=upstream_detail)
+        except Exception as exc:
+            logger.error("OpenAI upstream error: %s", exc)
+            error_message = LanguageDetector.get_error_message('upstream_error', detected_lang)
+            raise HTTPException(status_code=502, detail={"error": "upstream_error", "message": error_message})
+
+        try:
+            data = response.json()
+        except Exception as exc:
+            logger.error("Failed to parse OpenAI upstream response: %s", exc)
+            error_message = LanguageDetector.get_error_message('server_error', detected_lang)
+            # Close connection before raising exception
             try:
                 await response.aclose()
-                logger.debug("Connection closed after OpenAI chat processing")
             except Exception:
                 pass
+            raise HTTPException(status_code=502, detail={"error": "invalid_upstream_response", "message": error_message})
 
-            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-            created_ts = int(time.time())
-
-            result = {
-                "id": completion_id,
-                "object": "chat.completion",
-                "created": created_ts,
-                "model": model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": output_text
-                        },
-                        "finish_reason": "stop" if data.get('done', True) else None
-                    }
-                ],
-                "usage": usage
+        usage = _zero_usage()
+        output_text = ""
+        if isinstance(data, dict):
+            usage = {
+                "prompt_tokens": int(data.get('prompt_eval_count', 0) or 0),
+                "completion_tokens": int(data.get('eval_count', 0) or 0)
             }
+            usage['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
 
-            if 'system_fingerprint' in data:
-                result['system_fingerprint'] = data['system_fingerprint']
+            message = data.get('message')
+            if isinstance(message, dict):
+                output_text = message.get('content', '')
 
-            return JSONResponse(status_code=200, content=result)
-        
-        # Execute with concurrency control
-        try:
-            return await concurrency_manager.execute(
-                model_name=model,
-                request_id=request_id,
-                coro=process_openai_chat(),
-                timeout=config.get_int('request_timeout', 300)
+        if config.get('enable_output_guard', True) and output_text:
+            output_result = await guard_manager.scan_output(
+                output_text,
+                prompt=prompt_text,
+                block_on_error=config.get('block_on_guard_error', False)
             )
-        except asyncio.QueueFull:
-            error_message = LanguageDetector.get_error_message('server_busy', detected_lang)
-            raise HTTPException(status_code=429, detail={"error": "queue_full", "message": error_message, "model": model})
-        except asyncio.TimeoutError:
-            error_message = LanguageDetector.get_error_message('request_timeout', detected_lang)
-            raise HTTPException(status_code=504, detail={"error": "timeout", "message": error_message, "model": model})
+
+            if not output_result.get('allowed', True):
+                logger.warning("OpenAI output blocked by LLM Guard: %s", output_result)
+
+                # Explicitly close response to free resources immediately
+                try:
+                    await response.aclose()
+                    logger.info("Connection closed after blocking OpenAI non-streaming output")
+                except Exception as e:
+                    logger.debug(f"Error closing connection: {e}")
+
+                failed_scanners = extract_failed_scanners(output_result)
+                error_message = LanguageDetector.get_error_message('response_blocked', detected_lang)
+
+                guard_payload = {
+                    "failed_scanners": failed_scanners,
+                    "type": "output_blocked",
+                    "language": detected_lang,
+                    "usage": usage,
+                }
+
+                if inline_guard:
+                    markdown_message = format_markdown_error("Response blocked", error_message, failed_scanners)
+                    return _inline_chat_guard_response(model, markdown_message, False, guard_payload)
+
+                raise HTTPException(
+                    status_code=451,
+                    detail=error_message,
+                    headers={
+                        "X-Error-Type": "content_policy_violation",
+                        "X-Block-Type": "output_blocked",
+                        "X-Language": detected_lang,
+                        "X-Failed-Scanners": json.dumps(failed_scanners)
+                    }
+                )
+        
+        # Close connection after successful processing
+        try:
+            await response.aclose()
+            logger.debug("Connection closed after OpenAI chat processing")
+        except Exception:
+            pass
+
+        completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+        created_ts = int(time.time())
+
+        result = {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created_ts,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": output_text
+                    },
+                    "finish_reason": "stop" if data.get('done', True) else None
+                }
+            ],
+            "usage": usage
+        }
+
+        if 'system_fingerprint' in data:
+            result['system_fingerprint'] = data['system_fingerprint']
+
+        return JSONResponse(status_code=200, content=result)
 
     @router.post("/v1/completions")
     async def openai_completions(request: Request):

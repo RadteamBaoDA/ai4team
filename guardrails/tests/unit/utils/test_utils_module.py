@@ -10,22 +10,6 @@ if str(SRC_PATH) not in sys.path:
 from ollama_guardrails.utils import utils
 
 
-class DummyRequest:
-    def __init__(self, headers=None, host="127.0.0.1"):
-        self.headers = headers or {}
-        self.client = SimpleNamespace(host=host)
-
-
-def test_extract_client_ip_prefers_forwarded():
-    req = DummyRequest(headers={"x-forwarded-for": "10.0.0.1, proxy"}, host="9.9.9.9")
-    assert utils.extract_client_ip(req) == "10.0.0.1"
-
-
-def test_extract_client_ip_falls_back_to_real_ip():
-    req = DummyRequest(headers={"x-real-ip": "172.16.0.5"})
-    assert utils.extract_client_ip(req) == "172.16.0.5"
-
-
 def test_extract_model_and_text_helpers():
     assert utils.extract_model_from_payload({"model": "llama"}) == "llama"
     assert utils.extract_model_from_payload({}) == "default"

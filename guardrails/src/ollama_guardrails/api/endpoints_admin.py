@@ -1,15 +1,13 @@
 """
-Admin and monitoring endpoints for the guard proxy.
+Admin endpoints for the guard proxy.
 
-This module contains administrative and monitoring endpoints:
+This module contains administrative endpoints:
 - Health check (/health)
 - Configuration (/config)
 - Statistics (/stats)
-- Queue management (/queue/*, /admin/queue/*)
 """
 
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter
 
@@ -17,20 +15,18 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_manager):
+def create_admin_endpoints(config, guard_manager):
     """
-    Create admin and monitoring endpoints with dependency injection.
+    Create admin endpoints with dependency injection.
     
     Args:
         config: Configuration object
         guard_manager: LLM Guard manager instance
-        ip_whitelist: IP whitelist manager
-        concurrency_manager: Concurrency manager instance
     """
     
     @router.get("/health")
     async def health_check():
-        """Health check endpoint with performance metrics."""
+        """Health check endpoint."""
         health_data = {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
@@ -38,16 +34,6 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
                 "input_guard": "enabled" if getattr(guard_manager, 'enable_input', False) else "disabled",
                 "output_guard": "enabled" if getattr(guard_manager, 'enable_output', False) else "disabled",
             },
-            "whitelist": ip_whitelist.get_stats(),
-        }
-        
-        # Add concurrency info
-        queue_stats = await concurrency_manager.get_stats()
-        health_data['concurrency'] = {
-            "default_parallel": queue_stats.get('default_parallel'),
-            "default_queue_limit": queue_stats.get('default_queue_limit'),
-            "total_models": queue_stats.get('total_models', 0),
-            "memory": concurrency_manager.get_memory_info()
         }
         
         # Add device information
@@ -59,7 +45,6 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
     @router.get("/config")
     async def get_config():
         """Get current configuration (non-sensitive)."""
-        # Build a minimal, non-sensitive view of the configuration
         safe_config = {
             'ollama_url': config.get('ollama_url'),
             'ollama_path': config.get('ollama_path'),
@@ -70,10 +55,6 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
             'block_on_guard_error': config.get('block_on_guard_error'),
         }
         
-        # Show whitelist summary (enabled, count) but not the raw IPs
-        wl = ip_whitelist.get_stats()
-        safe_config['nginx_whitelist'] = {'enabled': wl['enabled'], 'count': wl['count']}
-        
         # Add device info
         if hasattr(guard_manager, 'device'):
             safe_config['device'] = guard_manager.device
@@ -82,7 +63,7 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
 
     @router.get("/stats")
     async def get_stats():
-        """Get comprehensive statistics."""
+        """Get guard statistics."""
         stats = {
             "timestamp": datetime.now().isoformat(),
             "guards": {
@@ -90,43 +71,8 @@ def create_admin_endpoints(config, guard_manager, ip_whitelist, concurrency_mana
                 "output_enabled": getattr(guard_manager, 'enable_output', False),
                 "device": getattr(guard_manager, 'device', 'unknown'),
             },
-            "whitelist": ip_whitelist.get_stats(),
         }
         
         return stats
-
-    @router.get("/queue/stats")
-    async def get_queue_stats(model: Optional[str] = None):
-        """Get queue statistics for all models or a specific model."""
-        stats = await concurrency_manager.get_stats(model_name=model)
-        return stats
-
-    @router.get("/queue/memory")
-    async def get_memory_info():
-        """Get current memory information and recommended parallel limit."""
-        return concurrency_manager.get_memory_info()
-
-    @router.post("/admin/queue/reset")
-    async def reset_queue_stats(model: Optional[str] = None):
-        """Reset queue statistics (admin endpoint)."""
-        await concurrency_manager.reset_stats(model_name=model)
-        return {
-            "status": "success",
-            "message": f"Statistics reset for {'all models' if not model else f'model {model}'}"
-        }
-
-    @router.post("/admin/queue/update")
-    async def update_queue_limits(
-        model: str,
-        parallel_limit: Optional[int] = None,
-        queue_limit: Optional[int] = None
-    ):
-        """Update queue limits for a specific model (admin endpoint)."""
-        result = await concurrency_manager.update_limits(
-            model_name=model,
-            parallel_limit=parallel_limit,
-            queue_limit=queue_limit
-        )
-        return result
     
     return router

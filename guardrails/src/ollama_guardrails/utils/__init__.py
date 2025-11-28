@@ -16,7 +16,6 @@ from .language import get_language_message
 from .utils import (
     build_ollama_options_from_openai_payload,
     combine_messages_text,
-    extract_client_ip,
     extract_model_from_payload,
     extract_prompt_from_completion_payload,
     extract_text_from_payload,
@@ -54,7 +53,6 @@ from .guard_responses import (
 )
 
 __all__ = [
-    "extract_client_ip",
     "extract_model_from_payload", 
     "extract_text_from_payload",
     "extract_text_from_response",

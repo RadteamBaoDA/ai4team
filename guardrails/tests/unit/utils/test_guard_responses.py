@@ -41,4 +41,3 @@ def test_format_markdown_error_builds_table():
     assert "### Input blocked" in text
     assert "| Scanner |" in text
     assert "X" in text
-*** End Patch

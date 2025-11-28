@@ -2,16 +2,26 @@
 Test script to verify output guard scanning works for streaming requests.
 
 This script tests all streaming endpoints to ensure output guards are properly applied.
+
+Note: This is a manual test script that requires a running server.
+Run with: python -m tests.integration.test_streaming_guards
 """
 
 import asyncio
 import httpx
 import json
+import pytest
 
 PROXY_URL = "http://localhost:8080"
 
-async def test_streaming_endpoint(endpoint: str, payload: dict, test_name: str):
-    """Test a streaming endpoint with guard scanning."""
+
+@pytest.mark.skip(reason="Manual integration test requiring running server - run directly as a script")
+async def test_streaming_endpoint():
+    """Placeholder for pytest collection - actual logic is in _test_streaming_endpoint below."""
+    pass
+
+
+async def _test_streaming_endpoint(endpoint: str, payload: dict, test_name: str):
     print(f"\n{'='*60}")
     print(f"Testing: {test_name}")
     print(f"Endpoint: {endpoint}")
@@ -167,7 +177,7 @@ async def main():
     
     results = []
     for endpoint, payload, test_name in tests:
-        result = await test_streaming_endpoint(endpoint, payload, test_name)
+        result = await _test_streaming_endpoint(endpoint, payload, test_name)
         results.append((test_name, result))
         await asyncio.sleep(1)  # Brief pause between tests
     

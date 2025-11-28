@@ -11,10 +11,10 @@ import sys
 import logging
 from pathlib import Path
 
-# Add the parent directory to the path to import guard_manager
-sys.path.insert(0, str(Path(__file__).parent))
+# Add the src directory to the path to import guard_manager
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from guard_manager import LLMGuardManager
+from ollama_guardrails.guards.guard_manager import LLMGuardManager
 
 # Configure logging
 logging.basicConfig(

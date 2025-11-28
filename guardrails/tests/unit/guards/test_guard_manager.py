@@ -82,12 +82,9 @@ def test_count_tokens_uses_stub_encoder(monkeypatch):
         def encode(self, text):
             return list(text)
 
-    class DummyTiktoken:
-        def get_encoding(self, name):
-            return DummyEncoder()
-
-    monkeypatch.setattr(guard_manager, "tiktoken", DummyTiktoken())
     manager = guard_manager.LLMGuardManager(enable_input=False, enable_output=False)
+    # Directly set the encoder to bypass tiktoken import
+    manager._token_encoder = DummyEncoder()
     assert manager._count_tokens("tokens") == 6
 
 

@@ -30,4 +30,3 @@ def test_get_error_message_and_localized_message():
     assert "unsafe" in message
     localized = get_language_message("你好", "server_busy")
     assert localized
-*** End Patch

@@ -51,11 +51,6 @@ class DummyConfig(dict):
         return int(super().get(key, default))
 
 
-class ImmediateConcurrencyManager:
-    async def execute(self, model_name, request_id, coro, timeout):
-        return await coro
-
-
 class DummyGuardManager:
     def __init__(self, input_result=None, output_result=None):
         self.input_result = input_result or {"allowed": True, "scanners": {}}
@@ -113,7 +108,6 @@ def _make_test_client(guard_manager, overrides=None):
     router = create_ollama_endpoints(
         config=config,
         guard_manager=guard_manager,
-        concurrency_manager=ImmediateConcurrencyManager(),
     )
 
     app = FastAPI()
