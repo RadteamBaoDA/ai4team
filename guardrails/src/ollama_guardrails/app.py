@@ -14,6 +14,86 @@ import warnings
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
+# =============================================================================
+# EARLY LOGGING CONFIGURATION - MUST BE BEFORE ANY IMPORTS THAT USE LLM-GUARD
+# =============================================================================
+# Configure logging BEFORE importing any modules that might use llm-guard,
+# transformers, or other verbose third-party libraries.
+
+def _resolve_log_level(default: str = "INFO") -> int:
+    env_level = os.environ.get("LOG_LEVEL", default)
+    try:
+        return getattr(logging, env_level.upper())
+    except AttributeError:
+        return getattr(logging, default.upper(), logging.INFO)
+
+# Configure logging respecting LOG_LEVEL env (default INFO)
+_LOG_LEVEL = _resolve_log_level()
+
+# Optimize logging for performance:
+# 1. Use a memory handler to buffer logs and reduce disk I/O
+# 2. Flush buffer when it reaches capacity or on shutdown
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+))
+
+# Use MemoryHandler to buffer logs (flush every 100 records or 5 seconds)
+_memory_handler = logging.handlers.MemoryHandler(
+    capacity=100,  # Buffer up to 100 log records
+    flushLevel=logging.ERROR,  # Immediately flush on ERROR or higher
+    target=_log_handler,
+    flushOnClose=True,
+)
+
+logging.basicConfig(
+    level=_LOG_LEVEL,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[_memory_handler],
+    force=True,
+)
+
+# Silence verbose third-party loggers BEFORE they are imported
+# These libraries output debug/info logs even when LOG_LEVEL is set higher
+_third_party_log_level = max(_LOG_LEVEL, logging.INFO)
+for _lib_name in (
+    "llm_guard",
+    "llm_guard.input_scanners",
+    "llm_guard.output_scanners",
+    "llm_guard.input_scanners.anonymize",
+    "llm_guard.input_scanners.ban_substrings",
+    "llm_guard.input_scanners.code",
+    "llm_guard.input_scanners.prompt_injection",
+    "llm_guard.input_scanners.secrets",
+    "llm_guard.input_scanners.toxicity",
+    "llm_guard.output_scanners.ban_substrings",
+    "llm_guard.output_scanners.code",
+    "llm_guard.output_scanners.malicious_urls",
+    "llm_guard.output_scanners.no_refusal",
+    "llm_guard.output_scanners.toxicity",
+    "transformers",
+    "transformers.modeling_utils",
+    "transformers.configuration_utils",
+    "transformers.tokenization_utils",
+    "transformers.tokenization_utils_base",
+    "torch",
+    "sentence_transformers",
+    "huggingface_hub",
+    "huggingface_hub.file_download",
+    "httpx",
+    "httpcore",
+    "urllib3",
+    "filelock",
+):
+    logging.getLogger(_lib_name).setLevel(_third_party_log_level)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(_LOG_LEVEL)
+
+# =============================================================================
+# NOW SAFE TO IMPORT MODULES THAT USE LLM-GUARD
+# =============================================================================
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,58 +144,6 @@ from .api.endpoints_openai import create_openai_endpoints
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-
-def _resolve_log_level(default: str = "INFO") -> int:
-    env_level = os.environ.get("LOG_LEVEL", default)
-    try:
-        return getattr(logging, env_level.upper())
-    except AttributeError:
-        return getattr(logging, default.upper(), logging.INFO)
-
-# Configure logging respecting LOG_LEVEL env (default INFO)
-_LOG_LEVEL = _resolve_log_level()
-
-# Optimize logging for performance:
-# 1. Use a memory handler to buffer logs and reduce disk I/O
-# 2. Flush buffer when it reaches capacity or on shutdown
-_log_handler = logging.StreamHandler()
-_log_handler.setFormatter(logging.Formatter(
-    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-))
-
-# Use MemoryHandler to buffer logs (flush every 100 records or 5 seconds)
-_memory_handler = logging.handlers.MemoryHandler(
-    capacity=100,  # Buffer up to 100 log records
-    flushLevel=logging.ERROR,  # Immediately flush on ERROR or higher
-    target=_log_handler,
-    flushOnClose=True,
-)
-
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[_memory_handler],
-    force=True,
-)
-
-# Silence verbose third-party loggers (llm-guard, transformers, etc.)
-# These libraries output debug/info logs even when LOG_LEVEL is set higher
-_third_party_log_level = max(_LOG_LEVEL, logging.WARNING)
-for _lib_name in (
-    "llm_guard",
-    "transformers",
-    "torch",
-    "sentence_transformers",
-    "huggingface_hub",
-    "httpx",
-    "httpcore",
-    "urllib3",
-    "filelock",
-):
-    logging.getLogger(_lib_name).setLevel(_third_party_log_level)
-
-logger = logging.getLogger(__name__)
-logger.setLevel(_LOG_LEVEL)
 
 
 def _flush_log_buffer() -> None:
@@ -188,6 +216,7 @@ def create_app(config_file: str | None = None) -> FastAPI:
     guard_manager = LLMGuardManager(
         enable_input=config.get_bool("enable_input_guard", True),
         enable_output=config.get_bool("enable_output_guard", True),
+        enable_anonymize=config.get_bool("enable_anonymize", False),
         lazy_init=False,  # Scanners initialize at startup
         enable_input_code_scanner=config.get_bool("enable_input_code_scanner", False),
         input_scanners_config=input_scanners_config,

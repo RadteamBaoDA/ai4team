@@ -89,7 +89,8 @@ def test_count_tokens_uses_stub_encoder(monkeypatch):
 
 
 def test_ensure_input_scanners_initialized_creates_vault(stub_guard_env):
-    manager = guard_manager.LLMGuardManager(enable_input=True, enable_output=False, lazy_init=True)
+    # enable_anonymize=True is required for vault to be created
+    manager = guard_manager.LLMGuardManager(enable_input=True, enable_output=False, enable_anonymize=True, lazy_init=True)
     manager._ensure_input_scanners_initialized()
     assert manager._input_scanners_initialized is True
     assert manager.vault is not None

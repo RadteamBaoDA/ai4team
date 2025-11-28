@@ -149,7 +149,7 @@ export_variables() {
     
     # Logging configuration
     export DEBUG="${DEBUG:-false}"
-    export LOG_LEVEL="${LOG_LEVEL:-info}"
+    export LOG_LEVEL="${LOG_LEVEL:-INFO}"
     export LOG_ROTATE_DAYS="${LOG_ROTATE_DAYS:-7}"
 }
 
