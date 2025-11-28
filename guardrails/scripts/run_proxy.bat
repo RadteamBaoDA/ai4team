@@ -186,6 +186,25 @@ if not defined HF_HUB_OFFLINE set "HF_HUB_OFFLINE=true"
 if not defined TRANSFORMERS_CACHE set "TRANSFORMERS_CACHE=%PROJECT_ROOT%\models\huggingface\transformers"
 if not defined HF_DATASETS_CACHE set "HF_DATASETS_CACHE=%PROJECT_ROOT%\models\huggingface\datasets"
 
+REM LLM Guard Fast Fail - Stop scanning on first failure
+if not defined LLM_GUARD_FAST_FAIL set "LLM_GUARD_FAST_FAIL=true"
+if not defined LLM_GUARD_USE_LOCAL_MODELS set "LLM_GUARD_USE_LOCAL_MODELS=true"
+
+REM Individual Input Scanner Enable/Disable
+if not defined LLM_GUARD_INPUT_BAN_SUBSTRINGS set "LLM_GUARD_INPUT_BAN_SUBSTRINGS=true"
+if not defined LLM_GUARD_INPUT_PROMPT_INJECTION set "LLM_GUARD_INPUT_PROMPT_INJECTION=true"
+if not defined LLM_GUARD_INPUT_TOXICITY set "LLM_GUARD_INPUT_TOXICITY=true"
+if not defined LLM_GUARD_INPUT_SECRETS set "LLM_GUARD_INPUT_SECRETS=true"
+if not defined LLM_GUARD_INPUT_CODE set "LLM_GUARD_INPUT_CODE=true"
+if not defined LLM_GUARD_INPUT_ANONYMIZE set "LLM_GUARD_INPUT_ANONYMIZE=true"
+
+REM Individual Output Scanner Enable/Disable
+if not defined LLM_GUARD_OUTPUT_BAN_SUBSTRINGS set "LLM_GUARD_OUTPUT_BAN_SUBSTRINGS=true"
+if not defined LLM_GUARD_OUTPUT_TOXICITY set "LLM_GUARD_OUTPUT_TOXICITY=true"
+if not defined LLM_GUARD_OUTPUT_MALICIOUS_URLS set "LLM_GUARD_OUTPUT_MALICIOUS_URLS=true"
+if not defined LLM_GUARD_OUTPUT_NO_REFUSAL set "LLM_GUARD_OUTPUT_NO_REFUSAL=true"
+if not defined LLM_GUARD_OUTPUT_CODE set "LLM_GUARD_OUTPUT_CODE=true"
+
 REM Build uvicorn command to run via the selected Python interpreter (ensures venv packages are used)
 set "UVICORN_CMD=%PYTHON_CMD% -m uvicorn %PROXY_MODULE%"
 set "UVICORN_CMD=!UVICORN_CMD! --host %HOST%"
@@ -269,6 +288,25 @@ echo   HF_HOME:                %HF_HOME%
 echo   HF_OFFLINE:             %HF_OFFLINE%
 echo   TRANSFORMERS_OFFLINE:   %TRANSFORMERS_OFFLINE%
 echo ════════════════════════════════════════════════════════════════
+echo LLM Guard Configuration:
+echo   LLM_GUARD_FAST_FAIL:           %LLM_GUARD_FAST_FAIL%
+echo   LLM_GUARD_USE_LOCAL_MODELS:    %LLM_GUARD_USE_LOCAL_MODELS%
+echo.
+echo Input Scanners:
+echo   BAN_SUBSTRINGS:    %LLM_GUARD_INPUT_BAN_SUBSTRINGS%
+echo   PROMPT_INJECTION:  %LLM_GUARD_INPUT_PROMPT_INJECTION%
+echo   TOXICITY:          %LLM_GUARD_INPUT_TOXICITY%
+echo   SECRETS:           %LLM_GUARD_INPUT_SECRETS%
+echo   CODE:              %LLM_GUARD_INPUT_CODE%
+echo   ANONYMIZE:         %LLM_GUARD_INPUT_ANONYMIZE%
+echo.
+echo Output Scanners:
+echo   BAN_SUBSTRINGS:    %LLM_GUARD_OUTPUT_BAN_SUBSTRINGS%
+echo   TOXICITY:          %LLM_GUARD_OUTPUT_TOXICITY%
+echo   MALICIOUS_URLS:    %LLM_GUARD_OUTPUT_MALICIOUS_URLS%
+echo   NO_REFUSAL:        %LLM_GUARD_OUTPUT_NO_REFUSAL%
+echo   CODE:              %LLM_GUARD_OUTPUT_CODE%
+echo ════════════════════════════════════════════════════════════════
 echo Testing proxy:
 echo   curl http://%HOST%:%PORT%/health
 echo Generating:
@@ -327,6 +365,23 @@ echo   IP_BLACKLIST             Comma-separated IPs
 echo   CONFIG_FILE              Configuration file path
 echo   VENV_DIR                 Python virtual environment directory (default: venv)
 echo   USE_VENV                 true/false - Enable/disable venv activation (default: true)
+echo   LLM_GUARD_FAST_FAIL      true/false - Stop scanning on first failure (default: true)
+echo   LLM_GUARD_USE_LOCAL_MODELS  true/false - Enable/disable local models
+echo.
+echo Individual Input Scanner Enable/Disable:
+echo   LLM_GUARD_INPUT_BAN_SUBSTRINGS    true/false (default: true)
+echo   LLM_GUARD_INPUT_PROMPT_INJECTION  true/false (default: true)
+echo   LLM_GUARD_INPUT_TOXICITY          true/false (default: true)
+echo   LLM_GUARD_INPUT_SECRETS           true/false (default: true)
+echo   LLM_GUARD_INPUT_CODE              true/false (default: true)
+echo   LLM_GUARD_INPUT_ANONYMIZE         true/false (default: true)
+echo.
+echo Individual Output Scanner Enable/Disable:
+echo   LLM_GUARD_OUTPUT_BAN_SUBSTRINGS   true/false (default: true)
+echo   LLM_GUARD_OUTPUT_TOXICITY         true/false (default: true)
+echo   LLM_GUARD_OUTPUT_MALICIOUS_URLS   true/false (default: true)
+echo   LLM_GUARD_OUTPUT_NO_REFUSAL       true/false (default: true)
+echo   LLM_GUARD_OUTPUT_CODE             true/false (default: true)
 echo.
 goto end
 

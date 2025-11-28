@@ -66,6 +66,11 @@ enable_output_guard: true
 # If false, errors are logged but requests are allowed
 block_on_guard_error: true
 
+# If true, stop scanning on first scanner failure (faster)
+# If false, run all scanners and collect all failures (more detailed)
+# Can also be set via LLM_GUARD_FAST_FAIL environment variable
+scan_fail_fast: true
+
 # Local Models Configuration
 # Set to true to use locally downloaded models instead of downloading from HuggingFace
 use_local_models: false
@@ -97,6 +102,7 @@ request_timeout: 300
 enable_queue_stats: true
 
 # Input Scanner Configuration
+# Each scanner can be individually enabled/disabled
 input_scanners:
   ban_substrings:
     enabled: true
@@ -117,11 +123,15 @@ input_scanners:
   code:
     enabled: true
   
+  anonymize:
+    enabled: true
+  
   token_limit:
     enabled: true
     limit: 4000
 
 # Output Scanner Configuration
+# Each scanner can be individually enabled/disabled
 output_scanners:
   ban_substrings:
     enabled: true
@@ -137,6 +147,9 @@ output_scanners:
     enabled: true
   
   no_refusal:
+    enabled: true
+  
+  code:
     enabled: true
 
 # Logging Configuration

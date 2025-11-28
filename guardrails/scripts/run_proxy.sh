@@ -66,7 +66,24 @@ RELOAD="${RELOAD:-false}"
 CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/config/config.yaml}"
 PROXY_MODULE="ollama_guardrails.app:app"
 LLM_GUARD_USE_LOCAL_MODELS="True"
-SCAN_FAIL_FAST="True"
+
+# LLM Guard Fast Fail - Stop scanning on first failure
+LLM_GUARD_FAST_FAIL="${LLM_GUARD_FAST_FAIL:-true}"
+
+# Individual Input Scanner Enable/Disable
+LLM_GUARD_INPUT_BAN_SUBSTRINGS="${LLM_GUARD_INPUT_BAN_SUBSTRINGS:-true}"
+LLM_GUARD_INPUT_PROMPT_INJECTION="${LLM_GUARD_INPUT_PROMPT_INJECTION:-true}"
+LLM_GUARD_INPUT_TOXICITY="${LLM_GUARD_INPUT_TOXICITY:-true}"
+LLM_GUARD_INPUT_SECRETS="${LLM_GUARD_INPUT_SECRETS:-true}"
+LLM_GUARD_INPUT_CODE="${LLM_GUARD_INPUT_CODE:-true}"
+LLM_GUARD_INPUT_ANONYMIZE="${LLM_GUARD_INPUT_ANONYMIZE:-true}"
+
+# Individual Output Scanner Enable/Disable
+LLM_GUARD_OUTPUT_BAN_SUBSTRINGS="${LLM_GUARD_OUTPUT_BAN_SUBSTRINGS:-true}"
+LLM_GUARD_OUTPUT_TOXICITY="${LLM_GUARD_OUTPUT_TOXICITY:-true}"
+LLM_GUARD_OUTPUT_MALICIOUS_URLS="${LLM_GUARD_OUTPUT_MALICIOUS_URLS:-true}"
+LLM_GUARD_OUTPUT_NO_REFUSAL="${LLM_GUARD_OUTPUT_NO_REFUSAL:-true}"
+LLM_GUARD_OUTPUT_CODE="${LLM_GUARD_OUTPUT_CODE:-true}"
 
 # Concurrency monitoring
 ENABLE_CONCURRENCY_MONITOR="${ENABLE_CONCURRENCY_MONITOR:-true}"
@@ -91,7 +108,24 @@ export_variables() {
     export IP_WHITELIST="${IP_WHITELIST:-}"
     export IP_BLACKLIST="${IP_BLACKLIST:-}"
     export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-True}"
-    export SCAN_FAIL_FAST="${SCAN_FAIL_FAST:-True}"
+    
+    # LLM Guard Fast Fail
+    export LLM_GUARD_FAST_FAIL="${LLM_GUARD_FAST_FAIL:-true}"
+    
+    # Individual Input Scanner Enable/Disable
+    export LLM_GUARD_INPUT_BAN_SUBSTRINGS="${LLM_GUARD_INPUT_BAN_SUBSTRINGS:-true}"
+    export LLM_GUARD_INPUT_PROMPT_INJECTION="${LLM_GUARD_INPUT_PROMPT_INJECTION:-true}"
+    export LLM_GUARD_INPUT_TOXICITY="${LLM_GUARD_INPUT_TOXICITY:-true}"
+    export LLM_GUARD_INPUT_SECRETS="${LLM_GUARD_INPUT_SECRETS:-true}"
+    export LLM_GUARD_INPUT_CODE="${LLM_GUARD_INPUT_CODE:-true}"
+    export LLM_GUARD_INPUT_ANONYMIZE="${LLM_GUARD_INPUT_ANONYMIZE:-true}"
+    
+    # Individual Output Scanner Enable/Disable
+    export LLM_GUARD_OUTPUT_BAN_SUBSTRINGS="${LLM_GUARD_OUTPUT_BAN_SUBSTRINGS:-true}"
+    export LLM_GUARD_OUTPUT_TOXICITY="${LLM_GUARD_OUTPUT_TOXICITY:-true}"
+    export LLM_GUARD_OUTPUT_MALICIOUS_URLS="${LLM_GUARD_OUTPUT_MALICIOUS_URLS:-true}"
+    export LLM_GUARD_OUTPUT_NO_REFUSAL="${LLM_GUARD_OUTPUT_NO_REFUSAL:-true}"
+    export LLM_GUARD_OUTPUT_CODE="${LLM_GUARD_OUTPUT_CODE:-true}"
     
     # Force Transformers to Use CPU (Primary Setting)
     export LLM_GUARD_DEVICE="${LLM_GUARD_DEVICE:-cpu}"
@@ -416,6 +450,22 @@ Environment Variables:
   USE_VENV                   true/false - Enable/disable venv activation
                              (default: true)
   LLM_GUARD_USE_LOCAL_MODELS true/false - Enable/disable local models
+  LLM_GUARD_FAST_FAIL        true/false - Stop scanning on first failure (default: true)
+  
+Individual Input Scanner Enable/Disable:
+  LLM_GUARD_INPUT_BAN_SUBSTRINGS    true/false (default: true)
+  LLM_GUARD_INPUT_PROMPT_INJECTION  true/false (default: true)
+  LLM_GUARD_INPUT_TOXICITY          true/false (default: true)
+  LLM_GUARD_INPUT_SECRETS           true/false (default: true)
+  LLM_GUARD_INPUT_CODE              true/false (default: true)
+  LLM_GUARD_INPUT_ANONYMIZE         true/false (default: true)
+  
+Individual Output Scanner Enable/Disable:
+  LLM_GUARD_OUTPUT_BAN_SUBSTRINGS   true/false (default: true)
+  LLM_GUARD_OUTPUT_TOXICITY         true/false (default: true)
+  LLM_GUARD_OUTPUT_MALICIOUS_URLS   true/false (default: true)
+  LLM_GUARD_OUTPUT_NO_REFUSAL       true/false (default: true)
+  LLM_GUARD_OUTPUT_CODE             true/false (default: true)
   
 Concurrency & Monitoring Variables:
   ENABLE_CONCURRENCY_MONITOR true/false - Enable real-time concurrency tracking

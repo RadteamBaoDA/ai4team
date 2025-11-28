@@ -93,9 +93,11 @@ class LLMGuardManager:
         self,
         enable_input: bool = True,
         enable_output: bool = True,
-    enable_anonymize: bool = True,
-    lazy_init: bool = True,
-    enable_input_code_scanner: Optional[bool] = False,
+        enable_anonymize: bool = True,
+        lazy_init: bool = True,
+        enable_input_code_scanner: Optional[bool] = False,
+        input_scanners_config: Optional[Dict[str, Any]] = None,
+        output_scanners_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize LLM Guard Manager with input and output scanning capabilities.
@@ -108,11 +110,19 @@ class LLMGuardManager:
             enable_output: Enable output scanning (default: True)
             enable_anonymize: Enable PII anonymization (default: True)
             lazy_init: If True, defer scanner initialization until first use (default: True)
+            enable_input_code_scanner: Enable code scanner for input (default: False)
+            input_scanners_config: Individual input scanner configurations from config.yaml
+            output_scanners_config: Individual output scanner configurations from config.yaml
         """
         self.enable_input = enable_input and HAS_LLM_GUARD
         self.enable_output = enable_output and HAS_LLM_GUARD
         self.enable_anonymize = enable_anonymize and HAS_LLM_GUARD
         self.lazy_init = lazy_init
+        
+        # Store scanner configurations for individual enable/disable control
+        self.input_scanners_config = input_scanners_config or {}
+        self.output_scanners_config = output_scanners_config or {}
+        
         if enable_input_code_scanner is None:
             env_flag = os.environ.get('LLM_GUARD_ENABLE_INPUT_CODE_SCANNER')
             if env_flag is None:
@@ -373,37 +383,135 @@ class LLMGuardManager:
         except Exception as e:
             logger.exception('Failed to configure local models: %s', e)
             self.use_local_models = False
+    
+    def _get_env_scanner_enabled(self, env_var_name: str) -> Optional[bool]:
+        """
+        Check if a scanner is enabled/disabled via environment variable.
+        
+        Args:
+            env_var_name: The environment variable name (e.g., 'LLM_GUARD_INPUT_TOXICITY')
             
+        Returns:
+            True/False if env var is set, None if not set
+        """
+        env_value = os.environ.get(env_var_name, '').lower()
+        if env_value in ('1', 'true', 'yes', 'on'):
+            return True
+        elif env_value in ('0', 'false', 'no', 'off'):
+            return False
+        return None
+            
+    def _is_input_scanner_enabled(self, scanner_name: str, default: bool = True) -> bool:
+        """
+        Check if an input scanner is enabled based on environment variable or configuration.
+        
+        Priority:
+        1. Environment variable (LLM_GUARD_INPUT_<SCANNER_NAME>)
+        2. Configuration file (input_scanners.<scanner_name>.enabled)
+        3. Default value
+        
+        Args:
+            scanner_name: The scanner key name in config (e.g., 'ban_substrings', 'prompt_injection')
+            default: Default value if scanner config is not found
+            
+        Returns:
+            True if scanner is enabled, False otherwise
+        """
+        # Check environment variable first (highest priority)
+        env_var_name = f'LLM_GUARD_INPUT_{scanner_name.upper()}'
+        env_enabled = self._get_env_scanner_enabled(env_var_name)
+        if env_enabled is not None:
+            logger.debug(f'Input scanner {scanner_name} enabled={env_enabled} via env var {env_var_name}')
+            return env_enabled
+        
+        # Check config file
+        scanner_config = self.input_scanners_config.get(scanner_name, {})
+        if isinstance(scanner_config, dict):
+            return scanner_config.get('enabled', default)
+        return default
+    
+    def _is_output_scanner_enabled(self, scanner_name: str, default: bool = True) -> bool:
+        """
+        Check if an output scanner is enabled based on environment variable or configuration.
+        
+        Priority:
+        1. Environment variable (LLM_GUARD_OUTPUT_<SCANNER_NAME>)
+        2. Configuration file (output_scanners.<scanner_name>.enabled)
+        3. Default value
+        
+        Args:
+            scanner_name: The scanner key name in config (e.g., 'ban_substrings', 'toxicity')
+            default: Default value if scanner config is not found
+            
+        Returns:
+            True if scanner is enabled, False otherwise
+        """
+        # Check environment variable first (highest priority)
+        env_var_name = f'LLM_GUARD_OUTPUT_{scanner_name.upper()}'
+        env_enabled = self._get_env_scanner_enabled(env_var_name)
+        if env_enabled is not None:
+            logger.debug(f'Output scanner {scanner_name} enabled={env_enabled} via env var {env_var_name}')
+            return env_enabled
+        
+        # Check config file
+        scanner_config = self.output_scanners_config.get(scanner_name, {})
+        if isinstance(scanner_config, dict):
+            return scanner_config.get('enabled', default)
+        return default
+
     def _init_input_scanners(self):
         """
         Initialize input scanners for use with scan_prompt function.
         Uses the official scan_prompt method from llm-guard library.
+        Each scanner can be individually enabled/disabled via configuration.
         """
         try:
             self.input_scanners = []
             
             # BanSubstrings scanner
-            self.input_scanners.append(
-                InputBanSubstrings(["malicious", "dangerous"])
-            )
+            if self._is_input_scanner_enabled('ban_substrings'):
+                ban_config = self.input_scanners_config.get('ban_substrings', {})
+                substrings = ban_config.get('substrings', ["malicious", "dangerous"]) if isinstance(ban_config, dict) else ["malicious", "dangerous"]
+                self.input_scanners.append(
+                    InputBanSubstrings(substrings)
+                )
+                logger.info('Input BanSubstrings scanner enabled')
+            else:
+                logger.info('Input BanSubstrings scanner disabled via configuration')
             
             # PromptInjection scanner with local model support
-            self.input_scanners.append(
-                PromptInjection(model=PROMPT_INJECTION_MODEL if self.use_local_models else None)
-            )
+            if self._is_input_scanner_enabled('prompt_injection'):
+                self.input_scanners.append(
+                    PromptInjection(model=PROMPT_INJECTION_MODEL if self.use_local_models else None)
+                )
+                logger.info('Input PromptInjection scanner enabled')
+            else:
+                logger.info('Input PromptInjection scanner disabled via configuration')
             
             # Toxicity scanner with local model support
-            self.input_scanners.append(
-                InputToxicity(
-                    threshold=0.5,
-                    model=TOXICITY_MODEL if self.use_local_models else None
+            if self._is_input_scanner_enabled('toxicity'):
+                toxicity_config = self.input_scanners_config.get('toxicity', {})
+                threshold = toxicity_config.get('threshold', 0.5) if isinstance(toxicity_config, dict) else 0.5
+                self.input_scanners.append(
+                    InputToxicity(
+                        threshold=threshold,
+                        model=TOXICITY_MODEL if self.use_local_models else None
+                    )
                 )
-            )
+                logger.info('Input Toxicity scanner enabled with threshold=%s', threshold)
+            else:
+                logger.info('Input Toxicity scanner disabled via configuration')
             
             # Secrets scanner
-            self.input_scanners.append(Secrets())
+            if self._is_input_scanner_enabled('secrets'):
+                self.input_scanners.append(Secrets())
+                logger.info('Input Secrets scanner enabled')
+            else:
+                logger.info('Input Secrets scanner disabled via configuration')
             
-            if self.enable_input_code_scanner:
+            # Code scanner - check both config and enable_input_code_scanner flag
+            code_enabled_in_config = self._is_input_scanner_enabled('code')
+            if self.enable_input_code_scanner and code_enabled_in_config:
                 self.input_scanners.append(
                     InputCode(
                         languages=code_language,
@@ -411,11 +519,13 @@ class LLMGuardManager:
                         model=CODE_MODEL if self.use_local_models else None
                     )
                 )
+                logger.info('Input Code scanner enabled')
             else:
                 logger.info('Input Code scanner disabled via configuration')
             
-            # Add Anonymize scanner if vault is available
-            if self.enable_anonymize and self.vault:
+            # Anonymize scanner - check both enable_anonymize flag and config
+            anonymize_enabled_in_config = self._is_input_scanner_enabled('anonymize', default=self.enable_anonymize)
+            if self.enable_anonymize and self.vault and anonymize_enabled_in_config:
                 try:
                     # Use local model configuration if enabled
                     recognizer_conf = DEBERTA_AI4PRIVACY_v2_CONF if self.use_local_models else None
@@ -429,9 +539,11 @@ class LLMGuardManager:
                         recognizer_conf=recognizer_conf
                     )
                     self.input_scanners.append(anonymize_scanner)
-                    logger.info('Anonymize scanner added to input scanners')
+                    logger.info('Input Anonymize scanner enabled')
                 except Exception as e:
                     logger.warning('Failed to add Anonymize scanner: %s', e)
+            else:
+                logger.info('Input Anonymize scanner disabled via configuration')
             
             logger.info('Input scanners initialized: %d scanners ready for scan_prompt (local_models: %s)', 
                        len(self.input_scanners), self.use_local_models)
@@ -440,23 +552,68 @@ class LLMGuardManager:
             self.input_scanners = []
 
     def _init_output_scanners(self):
-        """Initialize output scanners for use with scan_output function."""
+        """
+        Initialize output scanners for use with scan_output function.
+        Each scanner can be individually enabled/disabled via configuration.
+        """
         try:
-            # Create scanners as a simple list for use with scan_output function
-            self.output_scanners = [
-                OutputBanSubstrings(["malicious", "dangerous"]),
-                OutputToxicity(
-                    threshold=0.5,
-                    model=TOXICITY_MODEL if self.use_local_models else None
-                ),
-                MaliciousURLs(model=MALICIOUS_URLS_MODEL if self.use_local_models else None),
-                NoRefusal(model=NO_REFUSAL_MODEL if self.use_local_models else None),
-                OutputCode(
-                    languages=code_language,
-                    is_blocked=True,
-                    model=CODE_MODEL if self.use_local_models else None
-                ),
-            ]
+            self.output_scanners = []
+            
+            # BanSubstrings scanner
+            if self._is_output_scanner_enabled('ban_substrings'):
+                ban_config = self.output_scanners_config.get('ban_substrings', {})
+                substrings = ban_config.get('substrings', ["malicious", "dangerous"]) if isinstance(ban_config, dict) else ["malicious", "dangerous"]
+                self.output_scanners.append(
+                    OutputBanSubstrings(substrings)
+                )
+                logger.info('Output BanSubstrings scanner enabled')
+            else:
+                logger.info('Output BanSubstrings scanner disabled via configuration')
+            
+            # Toxicity scanner
+            if self._is_output_scanner_enabled('toxicity'):
+                toxicity_config = self.output_scanners_config.get('toxicity', {})
+                threshold = toxicity_config.get('threshold', 0.5) if isinstance(toxicity_config, dict) else 0.5
+                self.output_scanners.append(
+                    OutputToxicity(
+                        threshold=threshold,
+                        model=TOXICITY_MODEL if self.use_local_models else None
+                    )
+                )
+                logger.info('Output Toxicity scanner enabled with threshold=%s', threshold)
+            else:
+                logger.info('Output Toxicity scanner disabled via configuration')
+            
+            # MaliciousURLs scanner
+            if self._is_output_scanner_enabled('malicious_urls'):
+                self.output_scanners.append(
+                    MaliciousURLs(model=MALICIOUS_URLS_MODEL if self.use_local_models else None)
+                )
+                logger.info('Output MaliciousURLs scanner enabled')
+            else:
+                logger.info('Output MaliciousURLs scanner disabled via configuration')
+            
+            # NoRefusal scanner
+            if self._is_output_scanner_enabled('no_refusal'):
+                self.output_scanners.append(
+                    NoRefusal(model=NO_REFUSAL_MODEL if self.use_local_models else None)
+                )
+                logger.info('Output NoRefusal scanner enabled')
+            else:
+                logger.info('Output NoRefusal scanner disabled via configuration')
+            
+            # Code scanner
+            if self._is_output_scanner_enabled('code'):
+                self.output_scanners.append(
+                    OutputCode(
+                        languages=code_language,
+                        is_blocked=True,
+                        model=CODE_MODEL if self.use_local_models else None
+                    )
+                )
+                logger.info('Output Code scanner enabled')
+            else:
+                logger.info('Output Code scanner disabled via configuration')
             
             logger.info('Output scanners initialized: %d scanners ready for scan_output (local_models: %s)', 
                        len(self.output_scanners), self.use_local_models)
