@@ -1,0 +1,65 @@
+# LLM Guard API - Docker Compose Configuration
+# Standalone API deployment for Ollama guardrails
+
+services:
+  llm-guard-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-guard-api:latest
+    container_name: llm-guard-api
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      # Application settings
+      - APP_NAME=${APP_NAME:-LLM Guard API}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_JSON=${LOG_JSON:-true}
+      
+      # Scan settings
+      - SCAN_FAIL_FAST=${SCAN_FAIL_FAST:-true}
+      - SCAN_PROMPT_TIMEOUT=${SCAN_PROMPT_TIMEOUT:-30}
+      - SCAN_OUTPUT_TIMEOUT=${SCAN_OUTPUT_TIMEOUT:-60}
+      - LAZY_LOAD=${LAZY_LOAD:-true}
+      
+      # Cache settings
+      - CACHE_MAX_SIZE=${CACHE_MAX_SIZE:-10000}
+      - CACHE_TTL=${CACHE_TTL:-3600}
+      
+      # Rate limiting
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_LIMIT=${RATE_LIMIT_LIMIT:-60/minute}
+      
+      # Authentication (optional)
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
+      
+      # Observability
+      - TRACING_EXPORTER=${TRACING_EXPORTER:-console}
+      - METRICS_TYPE=${METRICS_TYPE:-prometheus}
+    volumes:
+      # Mount configuration
+      - ./config/scanners.yml:/home/user/app/config/scanners.yml:ro
+      # Mount models directory for local models (optional)
+      - ./models:/home/user/app/models:ro
+      # Logs directory
+      - ./logs:/home/user/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - guardrails-network
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+
+networks:
+  guardrails-network:
+    driver: bridge
+    name: guardrails-network

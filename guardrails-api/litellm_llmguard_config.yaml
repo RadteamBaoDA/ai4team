@@ -1,0 +1,142 @@
+# LiteLLM Proxy Configuration with LLM Guard API Integration
+# Reference: https://protectai.github.io/llm-guard/tutorials/litellm/
+# 
+# This configuration integrates with the standalone LLM Guard API
+# deployed in the guardrails-api folder.
+#
+# Prerequisites:
+# 1. Deploy LLM Guard API: cd ../guardrails-api && docker-compose up -d
+# 2. Set environment variables:
+#    export LLM_GUARD_API_BASE="http://localhost:8000"
+#    export OLLAMA_API_BASE="http://192.168.1.2:11434"
+# 3. Install litellm: pip install 'litellm[proxy]'
+# 4. Run: litellm --config litellm_llmguard_config.yaml
+
+# ===== MODEL LIST =====
+model_list:
+  # Ollama Models - Primary Server
+  - model_name: llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+      stream: true
+
+  - model_name: mistral
+    litellm_params:
+      model: ollama/mistral
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  - model_name: neural-chat
+    litellm_params:
+      model: ollama/neural-chat
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  - model_name: codellama
+    litellm_params:
+      model: ollama/codellama
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  - model_name: qwen2.5
+    litellm_params:
+      model: ollama/qwen2.5
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  # Load balancing - Secondary Ollama Server
+  - model_name: llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: ${OLLAMA_API_BASE_2:-http://192.168.1.11:11434}
+      timeout: 300
+      max_retries: 2
+      stream: true
+
+  - model_name: mistral
+    litellm_params:
+      model: ollama/mistral
+      api_base: ${OLLAMA_API_BASE_2:-http://192.168.1.11:11434}
+      timeout: 300
+      max_retries: 2
+
+# ===== LLM GUARD INTEGRATION =====
+# Enable llmguard_moderations callback for content moderation
+litellm_settings:
+  # Add LLM Guard as a callback for all requests
+  callbacks: ["llmguard_moderations"]
+  
+  # LLM Guard mode options:
+  # - "all": Apply to all requests (default)
+  # - "key-specific": Only apply to keys with enable_llm_guard_check permission
+  # - "request-specific": Only apply when request includes enable_llm_guard_check
+  llm_guard_mode: "all"
+  
+  # Number of retries for failed requests
+  num_retries: 2
+  
+  # Request timeout in seconds
+  request_timeout: 300
+  
+  # Enable detailed logging
+  set_verbose: false
+  
+  # Drop unmapped params (for OpenAI compatibility)
+  drop_params: true
+
+# ===== ENVIRONMENT VARIABLES =====
+# These should be set in your shell or .env file:
+#
+# Required:
+#   LLM_GUARD_API_BASE=http://localhost:8000  # LLM Guard API endpoint
+#
+# Optional (for authenticated LLM Guard API):
+#   LLM_GUARD_API_KEY=your-auth-token
+#
+# Ollama servers:
+#   OLLAMA_API_BASE=http://192.168.1.2:11434
+#   OLLAMA_API_BASE_2=http://192.168.1.11:11434
+
+# ===== GENERAL SETTINGS =====
+general_settings:
+  # Master key for admin operations
+  master_key: ${LITELLM_MASTER_KEY:-sk-litellm-master-key}
+  
+  # Database for key management (optional)
+  # database_url: "postgresql://user:pass@localhost:5432/litellm"
+  
+  # Enable key management UI
+  # ui_access_token: ${UI_ACCESS_TOKEN}
+
+# ===== ROUTER SETTINGS =====
+router_settings:
+  # Load balancing strategy
+  routing_strategy: "least-busy"  # Options: round-robin, least-busy, latency-based-routing
+  
+  # Enable retries with exponential backoff
+  num_retries: 2
+  retry_after: 5
+  
+  # Timeout settings
+  timeout: 300
+  
+  # Context window fallbacks
+  context_window_fallbacks:
+    - model: llama3.2
+      context_window: 8192
+    - model: mistral
+      context_window: 32000
+
+# ===== RATE LIMITING =====
+# Rate limits per user/key
+# Requires database_url to be set
+# rate_limit:
+#   rpm: 60  # requests per minute
+#   tpm: 100000  # tokens per minute

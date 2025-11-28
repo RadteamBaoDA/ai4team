@@ -1,0 +1,86 @@
+# LLM Guard API - Standalone Deployment
+# Based on: https://protectai.github.io/llm-guard/api/deployment/
+# Multi-architecture support for x86_64 and ARM64 (Apple Silicon)
+
+FROM --platform=$BUILDPLATFORM python:3.12-slim AS base
+
+# Build arguments for multi-platform support
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG VERSION=1.0.0
+
+WORKDIR /home/user/app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    g++ \
+    make \
+    libgomp1 \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash user && \
+    chown -R user:user /home/user
+
+# Copy requirements first for better layer caching
+COPY --chown=user:user requirements.txt ./
+
+# Install Python dependencies with platform-specific optimizations
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        echo "Building for ARM64 (Apple Silicon compatible)"; \
+        pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
+    else \
+        echo "Building for x86_64"; \
+    fi && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy configuration
+COPY --chown=user:user config/ ./config/
+
+# Copy entrypoint script
+COPY --chown=user:user entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+
+# Create necessary directories
+RUN mkdir -p /home/user/app/logs /home/user/app/models /home/user/app/cache && \
+    chown -R user:user /home/user/app
+
+# Switch to non-root user
+USER user
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # PyTorch optimizations
+    OMP_NUM_THREADS=4 \
+    MKL_NUM_THREADS=4 \
+    OPENBLAS_NUM_THREADS=4 \
+    # LLM Guard configuration
+    LOG_LEVEL=INFO \
+    APP_PORT=8000 \
+    CACHE_MAX_SIZE=10000 \
+    CACHE_TTL=3600 \
+    SCAN_FAIL_FAST=true \
+    SCAN_PROMPT_TIMEOUT=30 \
+    SCAN_OUTPUT_TIMEOUT=60 \
+    LAZY_LOAD=true \
+    # Security
+    PYTHONHTTPSVERIFY=1
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8000/healthz || exit 1
+
+# Use entrypoint script for flexibility
+ENTRYPOINT ["./entrypoint.sh"]

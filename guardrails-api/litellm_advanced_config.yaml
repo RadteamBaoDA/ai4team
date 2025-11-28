@@ -1,0 +1,207 @@
+# LiteLLM Proxy Configuration - Advanced LLM Guard Integration
+# Reference: https://protectai.github.io/llm-guard/tutorials/litellm/
+#
+# This is an advanced configuration with:
+# - Per-key guard enable/disable
+# - Per-request guard control
+# - Multiple Ollama servers with load balancing
+# - Rate limiting and authentication
+#
+# Usage:
+# 1. Deploy LLM Guard API: cd ../guardrails-api && docker-compose up -d
+# 2. Set environment:
+#    export LLM_GUARD_API_BASE="http://localhost:8000"
+#    export LITELLM_MASTER_KEY="sk-your-secret-master-key"
+#    export DATABASE_URL="postgresql://user:pass@localhost:5432/litellm"
+# 3. Run: litellm --config litellm_advanced_config.yaml
+
+# ===== MODEL LIST =====
+model_list:
+  # ===== Ollama Llama Models =====
+  - model_name: llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+      stream: true
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+
+  - model_name: llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: ${OLLAMA_API_BASE_2:-http://192.168.1.11:11434}
+      timeout: 300
+      max_retries: 2
+      stream: true
+
+  - model_name: llama3.2
+    litellm_params:
+      model: ollama/llama3.2
+      api_base: ${OLLAMA_API_BASE_3:-http://192.168.1.20:11434}
+      timeout: 300
+      max_retries: 2
+      stream: true
+
+  # ===== Ollama Mistral Models =====
+  - model_name: mistral
+    litellm_params:
+      model: ollama/mistral
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+    model_info:
+      max_tokens: 32000
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+
+  - model_name: mistral
+    litellm_params:
+      model: ollama/mistral
+      api_base: ${OLLAMA_API_BASE_2:-http://192.168.1.11:11434}
+      timeout: 300
+      max_retries: 2
+
+  # ===== Ollama Coding Models =====
+  - model_name: codellama
+    litellm_params:
+      model: ollama/codellama
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  - model_name: deepseek-coder
+    litellm_params:
+      model: ollama/deepseek-coder
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  # ===== Ollama Qwen Models =====
+  - model_name: qwen2.5
+    litellm_params:
+      model: ollama/qwen2.5
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  - model_name: qwen2.5-coder
+    litellm_params:
+      model: ollama/qwen2.5-coder
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  # ===== Ollama Other Models =====
+  - model_name: neural-chat
+    litellm_params:
+      model: ollama/neural-chat
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  - model_name: phi3
+    litellm_params:
+      model: ollama/phi3
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+  - model_name: gemma2
+    litellm_params:
+      model: ollama/gemma2
+      api_base: ${OLLAMA_API_BASE:-http://192.168.1.2:11434}
+      timeout: 300
+      max_retries: 2
+
+# ===== LLM GUARD SETTINGS =====
+litellm_settings:
+  # Enable LLM Guard moderations callback
+  callbacks: ["llmguard_moderations"]
+  
+  # Guard mode options:
+  # - "all": Apply guardrails to all requests
+  # - "key-specific": Only apply to keys with enable_llm_guard_check=true
+  # - "request-specific": Only apply when request includes enable_llm_guard_check
+  llm_guard_mode: "key-specific"
+  
+  # Fallback settings
+  num_retries: 2
+  request_timeout: 300
+  
+  # Logging
+  set_verbose: false
+  json_logs: true
+  
+  # Drop unsupported params
+  drop_params: true
+  
+  # Caching (requires redis)
+  cache: true
+  cache_params:
+    type: "redis"
+    host: ${REDIS_HOST:-localhost}
+    port: ${REDIS_PORT:-6379}
+
+# ===== GENERAL SETTINGS =====
+general_settings:
+  # Master key for API administration
+  master_key: ${LITELLM_MASTER_KEY:-sk-litellm-master-key}
+  
+  # Database for persistent storage (required for key management)
+  database_url: ${DATABASE_URL:-sqlite:///./litellm.db}
+  
+  # Enable proxy admin UI
+  # Access at http://localhost:4000/ui
+  ui_access_token: ${UI_ACCESS_TOKEN:-}
+  
+  # Custom auth (optional)
+  # custom_auth: "custom_auth.custom_auth_function"
+  
+  # Alerting (optional)
+  # alerting: ["slack"]
+  # alerting_threshold: 300
+
+# ===== ROUTER SETTINGS =====
+router_settings:
+  # Load balancing strategy
+  routing_strategy: "least-busy"
+  
+  # Allowed request failures before switching model
+  allowed_fails: 3
+  
+  # Cooldown time after failure (seconds)
+  cooldown_time: 60
+  
+  # Enable retries
+  num_retries: 2
+  retry_after: 5
+  
+  # Timeout
+  timeout: 300
+  
+  # Model fallbacks
+  fallbacks:
+    - llama3.2: [mistral, neural-chat]
+    - mistral: [llama3.2, neural-chat]
+    - codellama: [deepseek-coder, qwen2.5-coder]
+
+# ===== ENVIRONMENT VARIABLES REFERENCE =====
+# Required:
+#   LLM_GUARD_API_BASE    - LLM Guard API endpoint (e.g., http://localhost:8000)
+#   LITELLM_MASTER_KEY    - Master key for admin operations
+#
+# Optional:
+#   LLM_GUARD_API_KEY     - Bearer token for LLM Guard API (if auth enabled)
+#   DATABASE_URL          - PostgreSQL/SQLite connection string
+#   REDIS_HOST            - Redis host for caching
+#   REDIS_PORT            - Redis port (default: 6379)
+#   UI_ACCESS_TOKEN       - Token for admin UI access
+#
+# Ollama Servers:
+#   OLLAMA_API_BASE       - Primary Ollama server
+#   OLLAMA_API_BASE_2     - Secondary Ollama server (load balancing)
+#   OLLAMA_API_BASE_3     - Tertiary Ollama server (additional capacity)

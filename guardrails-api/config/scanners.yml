@@ -1,0 +1,255 @@
+# LLM Guard API Scanners Configuration
+# Based on guards from ollama_guardrails project
+# Reference: https://protectai.github.io/llm-guard/api/overview/
+
+# Application Configuration
+app:
+  name: ${APP_NAME:LLM Guard API for Ollama}
+  log_level: ${LOG_LEVEL:INFO}
+  log_json: ${LOG_JSON:true}
+  # Stop scanning on first failure for faster response
+  scan_fail_fast: ${SCAN_FAIL_FAST:true}
+  # Timeout settings (seconds)
+  scan_prompt_timeout: ${SCAN_PROMPT_TIMEOUT:30}
+  scan_output_timeout: ${SCAN_OUTPUT_TIMEOUT:60}
+  # Load models on first request (helps with startup time)
+  lazy_load: ${LAZY_LOAD:true}
+
+# Rate Limiting Configuration
+rate_limit:
+  enabled: ${RATE_LIMIT_ENABLED:true}
+  limit: ${RATE_LIMIT_LIMIT:60/minute}
+
+# Authentication Configuration
+auth:
+  type: http_bearer
+  token: ${AUTH_TOKEN:}
+
+# Observability - Tracing
+tracing:
+  exporter: ${TRACING_EXPORTER:console}
+  endpoint: ${TRACING_OTEL_ENDPOINT:}
+
+# Observability - Metrics
+metrics:
+  exporter: ${METRICS_TYPE:prometheus}
+  endpoint: ${METRICS_ENDPOINT:}
+
+# Input Scanners - Applied to user prompts
+# Scanners are executed in the order listed
+input_scanners:
+  # Anonymize PII in prompts
+  - type: Anonymize
+    params:
+      use_faker: true
+      threshold: 0.75
+      preamble: ""
+      allowed_names: []
+      hidden_names: []
+      # Uncomment to use local model
+      # model_path: "./models/deberta-v3-base_finetuned_ai4privacy_v2"
+
+  # Ban specific code patterns
+  - type: BanCode
+    params:
+      threshold: 0.97
+      model_max_length: 256
+      # Uncomment to use local model
+      # model_path: "./models/programming-language-identification"
+
+  # Ban specific substrings
+  - type: BanSubstrings
+    params:
+      substrings:
+        - "malicious"
+        - "dangerous"
+        - "hack"
+        - "exploit"
+      match_type: "word"
+      case_sensitive: false
+      redact: false
+      contains_all: false
+
+  # Ban specific topics
+  - type: BanTopics
+    params:
+      topics:
+        - "violence"
+        - "illegal activities"
+        - "drug use"
+      threshold: 0.8
+      model_max_length: 256
+
+  # Detect gibberish text
+  - type: Gibberish
+    params:
+      threshold: 0.97
+      model_max_length: 256
+
+  # Detect invisible/hidden text
+  - type: InvisibleText
+    params: {}
+
+  # Language detection
+  - type: Language
+    params:
+      valid_languages: ["en", "vi"]
+      model_max_length: 256
+
+  # Prompt Injection Detection
+  - type: PromptInjection
+    params:
+      threshold: 0.92
+      match_type: truncate_head_tail
+      model_max_length: 256
+      # Uncomment to use local model
+      # model_path: "./models/deberta-v3-base-prompt-injection-v2"
+
+  # Regex patterns for sensitive data
+  - type: Regex
+    params:
+      patterns:
+        - "Bearer [A-Za-z0-9-._~+/]+"
+        - "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+      is_blocked: true
+      match_type: search
+      redact: true
+
+  # Secret detection (API keys, passwords, etc.)
+  - type: Secrets
+    params:
+      redact_mode: "all"
+
+  # Sentiment analysis
+  - type: Sentiment
+    params:
+      threshold: -0.5
+
+  # Token limit to prevent DoS
+  - type: TokenLimit
+    params:
+      limit: 4096
+      encoding_name: "cl100k_base"
+
+  # Toxicity detection
+  - type: Toxicity
+    params:
+      threshold: 0.7
+      model_max_length: 256
+      # Uncomment to use local model
+      # model_path: "./models/unbiased-toxic-roberta"
+
+# Output Scanners - Applied to LLM responses
+# Scanners are executed in the order listed
+output_scanners:
+  # Ban specific code patterns
+  - type: BanCode
+    params:
+      threshold: 0.97
+      model_max_length: 256
+
+  # Ban specific substrings
+  - type: BanSubstrings
+    params:
+      substrings:
+        - "malicious"
+        - "dangerous"
+      match_type: "word"
+      case_sensitive: false
+      redact: false
+      contains_all: false
+
+  # Ban specific topics
+  - type: BanTopics
+    params:
+      topics:
+        - "violence"
+        - "illegal activities"
+      threshold: 0.8
+
+  # Bias detection
+  - type: Bias
+    params:
+      threshold: 0.97
+      model_max_length: 256
+
+  # Deanonymize - restore original values from Vault
+  - type: Deanonymize
+    params:
+      matching_strategy: "exact"
+
+  # Factual consistency check
+  - type: FactualConsistency
+    params:
+      minimum_score: 0.5
+
+  # Gibberish detection
+  - type: Gibberish
+    params:
+      threshold: 0.97
+
+  # Language validation
+  - type: Language
+    params:
+      valid_languages: ["en", "vi"]
+      model_max_length: 256
+
+  # Language same as input
+  - type: LanguageSame
+    params:
+      model_max_length: 256
+
+  # Malicious URLs detection
+  - type: MaliciousURLs
+    params:
+      threshold: 0.75
+      # Uncomment to use local model
+      # model_path: "./models/codebert-base-Malicious_URLs"
+
+  # No refusal detection
+  - type: NoRefusal
+    params:
+      threshold: 0.9
+      # Uncomment to use local model
+      # model_path: "./models/distilroberta-base-rejection-v1"
+
+  # Reading time limit
+  - type: ReadingTime
+    params:
+      max_time: 10
+      truncate: false
+
+  # Regex patterns
+  - type: Regex
+    params:
+      patterns:
+        - "Bearer [A-Za-z0-9-._~+/]+"
+      is_blocked: true
+      match_type: search
+      redact: true
+
+  # Relevance to prompt
+  - type: Relevance
+    params:
+      threshold: 0.2
+
+  # Sensitive data detection
+  - type: Sensitive
+    params:
+      redact: false
+      threshold: 0.75
+
+  # Sentiment analysis
+  - type: Sentiment
+    params:
+      threshold: -0.5
+
+  # Toxicity detection
+  - type: Toxicity
+    params:
+      threshold: 0.7
+      model_max_length: 256
+
+  # URL reachability check (optional - can be slow)
+  # - type: URLReachability
+  #   params: {}
