@@ -7,6 +7,7 @@ This module contains the FastAPI application factory and main server logic.
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 import time
 import warnings
@@ -66,7 +67,6 @@ if TYPE_CHECKING:
 
 def _resolve_log_level(default: str = "INFO") -> int:
     env_level = os.environ.get("LOG_LEVEL", default)
-    print(f"Setting log level to {env_level}")
     try:
         return getattr(logging, env_level.upper())
     except AttributeError:
@@ -74,15 +74,54 @@ def _resolve_log_level(default: str = "INFO") -> int:
 
 # Configure logging respecting LOG_LEVEL env (default INFO)
 _LOG_LEVEL = _resolve_log_level()
-print(f"Setting log level to {_LOG_LEVEL}")
+
+# Optimize logging for performance:
+# 1. Use a memory handler to buffer logs and reduce disk I/O
+# 2. Flush buffer when it reaches capacity or on shutdown
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+))
+
+# Use MemoryHandler to buffer logs (flush every 100 records or 5 seconds)
+_memory_handler = logging.handlers.MemoryHandler(
+    capacity=100,  # Buffer up to 100 log records
+    flushLevel=logging.ERROR,  # Immediately flush on ERROR or higher
+    target=_log_handler,
+    flushOnClose=True,
+)
+
 logging.basicConfig(
     level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[_memory_handler],
     force=True,
 )
 
+# Silence verbose third-party loggers (llm-guard, transformers, etc.)
+# These libraries output debug/info logs even when LOG_LEVEL is set higher
+_third_party_log_level = max(_LOG_LEVEL, logging.WARNING)
+for _lib_name in (
+    "llm_guard",
+    "transformers",
+    "torch",
+    "sentence_transformers",
+    "huggingface_hub",
+    "httpx",
+    "httpcore",
+    "urllib3",
+    "filelock",
+):
+    logging.getLogger(_lib_name).setLevel(_third_party_log_level)
+
 logger = logging.getLogger(__name__)
 logger.setLevel(_LOG_LEVEL)
+
+
+def _flush_log_buffer() -> None:
+    """Flush the log memory buffer to disk."""
+    _memory_handler.flush()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -90,7 +129,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Application starting up...")
     
-    # Log offline mode configuration
+    # Log offline mode configuration (only once at startup)
     tiktoken_cache = os.environ.get('TIKTOKEN_CACHE_DIR', './models/tiktoken')
     hf_home = os.environ.get('HF_HOME', './models/huggingface')
     tiktoken_offline = os.environ.get('TIKTOKEN_OFFLINE_MODE', 'true').lower() in ('1', 'true', 'yes', 'on')
@@ -113,12 +152,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Input guard: {'enabled' if config.get_bool('enable_input_guard', True) else 'disabled'}")
     logger.info(f"Output guard: {'enabled' if config.get_bool('enable_output_guard', True) else 'disabled'}")
     
+    # Flush startup logs to disk immediately
+    _flush_log_buffer()
+    
     yield
     
     # Shutdown
     logger.info("Application shutting down...")
     await close_http_client()
     logger.info("Application shutdown complete")
+    
+    # Ensure all logs are flushed on shutdown
+    _flush_log_buffer()
 
 
 def create_app(config_file: str | None = None) -> FastAPI:
@@ -190,21 +235,41 @@ def create_app(config_file: str | None = None) -> FastAPI:
         allowed_hosts=trusted_hosts + ["*"] if config.get("forwarded_allow_ips") == "*" else trusted_hosts
     )
 
+    # Skip logging for health check endpoints to reduce I/O
+    _skip_log_paths = frozenset({"/health", "/favicon.ico", "/metrics"})
+    
+    # Check if we should enable access logging (disabled by default for performance)
+    _enable_access_log = config.get_bool("enable_access_log", False)
+
     @app.middleware("http")
     async def log_requests(request: Request, call_next: Any) -> Any:
-        """Log requests with path and timing."""
-        logger.info("Request: %s %s", request.method, request.url.path)
+        """Log requests with path and timing (optimized for performance)."""
+        path = request.url.path
+        
+        # Skip logging for health checks and static assets to reduce I/O
+        if path in _skip_log_paths or not _enable_access_log:
+            return await call_next(request)
+        
+        # Only log at DEBUG level for regular requests to reduce disk I/O
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Request: %s %s", request.method, path)
+        
         start_ts = time.time()
         try:
             response = await call_next(request)
             return response
         finally:
+            # Only log timing for slow requests (>1s) or errors at INFO level
             duration_ms = int((time.time() - start_ts) * 1000)
             response_obj = locals().get("response", None)
-            if response_obj and hasattr(response_obj, "status_code"):
-                logger.info("Response status: %s (%d ms)", response_obj.status_code, duration_ms)
-            else:
-                logger.info("Response completed (%d ms)", duration_ms)
+            status_code = getattr(response_obj, "status_code", 0) if response_obj else 0
+            
+            # Log slow requests (>1000ms) or errors at WARNING level
+            if duration_ms > 1000 or status_code >= 400:
+                logger.warning("Slow/Error: %s %s -> %s (%d ms)", 
+                              request.method, path, status_code, duration_ms)
+            elif logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Response: %s (%d ms)", status_code, duration_ms)
 
     @app.middleware("http")
     async def handle_reverse_proxy_headers(request: Request, call_next: Any) -> Any:

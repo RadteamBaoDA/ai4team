@@ -85,10 +85,10 @@ LLM_GUARD_OUTPUT_MALICIOUS_URLS="${LLM_GUARD_OUTPUT_MALICIOUS_URLS:-true}"
 LLM_GUARD_OUTPUT_NO_REFUSAL="${LLM_GUARD_OUTPUT_NO_REFUSAL:-true}"
 LLM_GUARD_OUTPUT_CODE="${LLM_GUARD_OUTPUT_CODE:-true}"
 
-# Concurrency monitoring
-ENABLE_CONCURRENCY_MONITOR="${ENABLE_CONCURRENCY_MONITOR:-true}"
-MONITOR_UPDATE_INTERVAL="${MONITOR_UPDATE_INTERVAL:-5.0}"
+# Logging configuration
+ENABLE_ACCESS_LOG="${ENABLE_ACCESS_LOG:-false}"  # Disable access log by default for performance
 DEBUG="${DEBUG:-false}"
+LOG_ROTATE_DAYS="${LOG_ROTATE_DAYS:-7}"          # Keep logs for 7 days by default
 # Command to execute (start, stop, restart, status, logs, run)
 COMMAND="${1:-help}"
 shift 1 >/dev/null 2>&1 || true
@@ -100,13 +100,9 @@ export_variables() {
     export OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
     export PROXY_PORT="$PORT"
     export CONFIG_FILE="$CONFIG_FILE"
-    export NGINX_WHITELIST="${NGINX_WHITELIST:-}"
     export ENABLE_INPUT_GUARD="${ENABLE_INPUT_GUARD:-true}"
     export ENABLE_OUTPUT_GUARD="${ENABLE_OUTPUT_GUARD:-true}"
     export INLINE_GUARD_ERRORS="${INLINE_GUARD_ERRORS:-true}"
-    export ENABLE_IP_FILTER="${ENABLE_IP_FILTER:-}"
-    export IP_WHITELIST="${IP_WHITELIST:-}"
-    export IP_BLACKLIST="${IP_BLACKLIST:-}"
     export LLM_GUARD_USE_LOCAL_MODELS="${LLM_GUARD_USE_LOCAL_MODELS:-True}"
     
     # LLM Guard Fast Fail
@@ -126,6 +122,9 @@ export_variables() {
     export LLM_GUARD_OUTPUT_MALICIOUS_URLS="${LLM_GUARD_OUTPUT_MALICIOUS_URLS:-true}"
     export LLM_GUARD_OUTPUT_NO_REFUSAL="${LLM_GUARD_OUTPUT_NO_REFUSAL:-true}"
     export LLM_GUARD_OUTPUT_CODE="${LLM_GUARD_OUTPUT_CODE:-true}"
+    
+    # Logging configuration (access log disabled by default for disk I/O performance)
+    export ENABLE_ACCESS_LOG="${ENABLE_ACCESS_LOG:-false}"
     
     # Force Transformers to Use CPU (Primary Setting)
     export LLM_GUARD_DEVICE="${LLM_GUARD_DEVICE:-cpu}"
@@ -148,16 +147,40 @@ export_variables() {
     export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$PROJECT_ROOT/models/huggingface/transformers}"
     export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$PROJECT_ROOT/models/huggingface/datasets}"
     
-    # Concurrency monitoring
-    export ENABLE_CONCURRENCY_MONITOR="${ENABLE_CONCURRENCY_MONITOR:-true}"
-    export MONITOR_UPDATE_INTERVAL="${MONITOR_UPDATE_INTERVAL:-5.0}"
+    # Logging configuration
     export DEBUG="${DEBUG:-false}"
+    export LOG_LEVEL="${LOG_LEVEL:-info}"
+    export LOG_ROTATE_DAYS="${LOG_ROTATE_DAYS:-7}"
+}
+
+# Function to rotate and cleanup old logs
+rotate_logs() {
+    local rotate_days="${LOG_ROTATE_DAYS:-7}"
     
-    # Concurrency configuration (Ollama-style)
-    export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-auto}"
-    export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-512}"
-    export REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-300}"
-    export LOG_LEVEL="${LOG_LEVEL:-INFO}"
+    # Create timestamped backup of current log if it exists
+    if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+        local backup_name="$LOG_DIR/proxy_$(date +%Y%m%d_%H%M%S).log"
+        mv "$LOG_FILE" "$backup_name"
+        echo "✓ Rotated log to: $backup_name"
+        
+        # Compress old log
+        if command -v gzip >/dev/null 2>&1; then
+            gzip "$backup_name" 2>/dev/null && echo "✓ Compressed: ${backup_name}.gz"
+        fi
+    fi
+    
+    # Delete logs older than specified days
+    if [ -d "$LOG_DIR" ]; then
+        local deleted_count=0
+        while IFS= read -r -d '' old_log; do
+            rm -f "$old_log"
+            deleted_count=$((deleted_count + 1))
+        done < <(find "$LOG_DIR" -name "proxy_*.log*" -type f -mtime +"$rotate_days" -print0 2>/dev/null)
+        
+        if [ "$deleted_count" -gt 0 ]; then
+            echo "✓ Deleted $deleted_count log file(s) older than $rotate_days days"
+        fi
+    fi
 }
 
 # Function to run the uvicorn server
@@ -209,6 +232,9 @@ start_proxy() {
   
   # Create log directory if it doesn't exist
   mkdir -p "$LOG_DIR"
+  
+  # Rotate logs before starting (cleanup old logs)
+  rotate_logs
   
   # Export variables for the background process
   export_variables
@@ -301,6 +327,8 @@ restart_proxy() {
   echo "Restarting Ollama Guard Proxy..."
   stop_proxy || true
   sleep 1
+  # Rotate logs on restart
+  rotate_logs
   start_proxy
 }
 
@@ -319,8 +347,7 @@ status_proxy() {
     echo "  Port: $PORT"
     echo "  Config: $CONFIG_FILE"
     echo "  Ollama URL: ${OLLAMA_URL:-http://127.0.0.1:11434}"
-    echo "  Concurrency: ${OLLAMA_NUM_PARALLEL:-auto} parallel, ${OLLAMA_MAX_QUEUE:-512} queue"
-    echo "  Nginx Whitelist: ${NGINX_WHITELIST:-empty (unrestricted)}"
+    echo "  Access Log: ${ENABLE_ACCESS_LOG:-false}"
     echo "  Log file: $LOG_FILE"
     echo "  Using local mode: $LLM_GUARD_USE_LOCAL_MODELS"
     echo ""
@@ -364,11 +391,11 @@ run_foreground() {
       --debug)
         export LOG_LEVEL="debug"; export DEBUG="true"; shift
         ;;
+      --access-log)
+        export ENABLE_ACCESS_LOG="true"; shift
+        ;;
       --config)
         export CONFIG_FILE="$2"; shift 2
-        ;;
-      --monitor-interval)
-        export MONITOR_UPDATE_INTERVAL="$2"; shift 2
         ;;
       --help|-h)
         show_help
@@ -396,6 +423,7 @@ Commands:
   restart                  Restart proxy
   status                   Check proxy status
   logs                     View live proxy logs (tail -f)
+  rotate                   Rotate logs and cleanup old log files
   run [OPTIONS]            Run proxy in foreground (interactive)
   help                     Show this help message
 
@@ -404,9 +432,9 @@ Run Mode Options (with 'run' command):
   --port PORT              Server port (default: 9999)
   --log-level LEVEL        Logging level: debug, info, warning, error (default: info)
   --reload                 Auto-reload on code changes (development only)
-  --debug                  Enable debug logging + concurrency monitoring
+  --debug                  Enable debug logging
   --config FILE            Config file path (default: config.yaml)
-  --monitor-interval SEC   Concurrency monitor update interval in seconds (default: 5.0)
+  --access-log             Enable per-request access logging (disabled by default)
   --help                   Show this help message
 
 Examples:
@@ -434,16 +462,10 @@ Examples:
 Environment Variables:
   OLLAMA_URL                 Ollama backend URL (e.g., http://127.0.0.1:11434)
   PROXY_PORT                 Proxy port
-  NGINX_WHITELIST            Comma-separated IPs/CIDR for Nginx-only access
-                             (e.g., "127.0.0.1,192.168.1.0/24")
-                             Empty = allow all, for local dev only
   ENABLE_INPUT_GUARD         true/false - Enable input scanning
   ENABLE_OUTPUT_GUARD        true/false - Enable output scanning
   INLINE_GUARD_ERRORS        true/false - Return guard errors inline in response
                              (default: true)
-  ENABLE_IP_FILTER           true/false
-  IP_WHITELIST               Comma-separated IPs
-  IP_BLACKLIST               Comma-separated IPs
   CONFIG_FILE                Configuration file path
   VENV_DIR                   Python virtual environment directory
                              (default: ./venv)
@@ -467,19 +489,13 @@ Individual Output Scanner Enable/Disable:
   LLM_GUARD_OUTPUT_NO_REFUSAL       true/false (default: true)
   LLM_GUARD_OUTPUT_CODE             true/false (default: true)
   
-Concurrency & Monitoring Variables:
-  ENABLE_CONCURRENCY_MONITOR true/false - Enable real-time concurrency tracking
-  MONITOR_UPDATE_INTERVAL    Update interval in seconds (default: 5.0)
-  DEBUG                      true/false - Enable debug logging with metrics
-  
-Concurrency Variables (Ollama-style):
-  OLLAMA_NUM_PARALLEL        Max parallel requests per model
-                             "auto" selects 4 if >=16GB free RAM else 1; or set explicit: 1, 2, 4, 8
-                             (default: auto)
-  OLLAMA_MAX_QUEUE           Max queued requests before rejection
-                             (default: 512)
-  REQUEST_TIMEOUT            Request timeout in seconds
-                             (default: 300)
+Logging & Performance Variables:
+  ENABLE_ACCESS_LOG          true/false - Enable per-request access logging
+                             (default: false for better disk I/O performance)
+  DEBUG                      true/false - Enable debug logging
+  LOG_LEVEL                  Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+  LOG_ROTATE_DAYS            Number of days to keep log files (default: 7)
+                             Old logs are automatically deleted on start/restart
 
 Log Files:
   All logs are written to: $LOG_DIR/proxy.log
@@ -597,6 +613,11 @@ case "$COMMAND" in
     ;;
   logs)
     show_logs
+    ;;
+  rotate)
+    echo "Rotating logs (keeping last ${LOG_ROTATE_DAYS} days)..."
+    rotate_logs
+    echo "✓ Log rotation complete"
     ;;
   run)
     run_foreground "$@"
