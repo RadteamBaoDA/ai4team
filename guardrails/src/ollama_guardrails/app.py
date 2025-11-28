@@ -140,12 +140,18 @@ def create_app(config_file: str | None = None) -> FastAPI:
     # Initialize configuration
     config = Config(config_file or os.environ.get("CONFIG_FILE"))
 
+    # Get individual scanner configurations from config.yaml
+    input_scanners_config = config.get("input_scanners", {})
+    output_scanners_config = config.get("output_scanners", {})
+
     # Initialize guard manager (scanners load at startup)
     guard_manager = LLMGuardManager(
         enable_input=config.get_bool("enable_input_guard", True),
         enable_output=config.get_bool("enable_output_guard", True),
         lazy_init=False,  # Scanners initialize at startup
         enable_input_code_scanner=config.get_bool("enable_input_code_scanner", False),
+        input_scanners_config=input_scanners_config,
+        output_scanners_config=output_scanners_config,
     )
 
     # Initialize IP whitelist (nginx only)
