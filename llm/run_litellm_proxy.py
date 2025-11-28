@@ -142,6 +142,20 @@ Examples:
     )
     
     parser.add_argument(
+        '--input-score-threshold',
+        type=float,
+        default=float(os.getenv('LLM_GUARD_INPUT_SCORE_THRESHOLD', 0.9)),
+        help='Input scanner score threshold (0.0-1.0). Scores below this are rejected. Default: 0.9'
+    )
+    
+    parser.add_argument(
+        '--output-score-threshold',
+        type=float,
+        default=float(os.getenv('LLM_GUARD_OUTPUT_SCORE_THRESHOLD', 0.9)),
+        help='Output scanner score threshold (0.0-1.0). Scores below this are rejected. Default: 0.9'
+    )
+    
+    parser.add_argument(
         '--validate-only',
         action='store_true',
         help='Validate config and guardrail, then exit'

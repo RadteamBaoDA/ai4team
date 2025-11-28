@@ -132,6 +132,15 @@ class LLMGuardManager:
         self.enable_input_code_scanner = bool(enable_input_code_scanner) and HAS_LLM_GUARD
         self.scan_fail_fast = os.environ.get('LLM_GUARD_FAST_FAIL', 'true').lower() in ('1', 'true', 'yes', 'on')
         logger.info(f'Fast fail enabled: {self.scan_fail_fast}')
+        
+        # Score threshold configuration for overriding is_valid
+        # If scanner score < threshold, mark as invalid (failed)
+        # Environment variables: LLM_GUARD_INPUT_SCORE_THRESHOLD, LLM_GUARD_OUTPUT_SCORE_THRESHOLD
+        # Default: 0.9 (90%) - scores below this are considered failures
+        self.input_score_threshold = self._get_score_threshold('LLM_GUARD_INPUT_SCORE_THRESHOLD', 0.9)
+        self.output_score_threshold = self._get_score_threshold('LLM_GUARD_OUTPUT_SCORE_THRESHOLD', 0.9)
+        logger.info(f'Score thresholds - Input: {self.input_score_threshold}, Output: {self.output_score_threshold}')
+        
         # Lazy initialization flags
         self._initialized = False
         self._input_scanners_initialized = False
@@ -210,6 +219,29 @@ class LLMGuardManager:
         if use_local:
             logger.info('Local models enabled via LLM_GUARD_USE_LOCAL_MODELS environment variable')
         return use_local
+
+    def _get_score_threshold(self, env_var: str, default: float = 0.9) -> float:
+        """
+        Get score threshold from environment variable.
+        
+        Args:
+            env_var: Environment variable name
+            default: Default threshold value (0.9 = 90%)
+            
+        Returns:
+            Score threshold between 0.0 and 1.0
+        """
+        try:
+            value = os.environ.get(env_var, '')
+            if value:
+                threshold = float(value)
+                # Ensure threshold is between 0 and 1
+                threshold = max(0.0, min(1.0, threshold))
+                logger.debug(f'{env_var} set to {threshold}')
+                return threshold
+        except ValueError as e:
+            logger.warning(f'Invalid value for {env_var}, using default {default}: {e}')
+        return default
 
     def _ensure_token_encoder(self):
         if self._token_encoder_failed:
@@ -639,19 +671,39 @@ class LLMGuardManager:
                 self.scan_fail_fast
             )
             
-            # Convert results to expected format
+            # Convert results to expected format with score threshold override
             scan_results = {}
+            override_count = 0
             for scanner_name, is_valid in results_valid.items():
                 raw_score = results_score.get(scanner_name, 0.0)
-                risk_score = max(0.0, min(raw_score, 1.0)) * 100
+                # Normalize score to 0-1 range
+                normalized_score = max(0.0, min(raw_score, 1.0))
+                risk_score = normalized_score * 100
+                
+                # Apply score threshold override:
+                # If score < threshold, override is_valid to False
+                original_valid = is_valid
+                if is_valid and normalized_score < self.input_score_threshold:
+                    is_valid = False
+                    override_count += 1
+                    logger.info(f'Scanner {scanner_name} overridden to FAIL: score={normalized_score:.3f} < threshold={self.input_score_threshold}')
+                    # Update results_valid for final all_valid check
+                    results_valid[scanner_name] = False
+                
                 scan_results[scanner_name] = {
                     'passed': is_valid,
                     'risk_score': risk_score,
+                    'raw_score': normalized_score,
+                    'threshold': self.input_score_threshold,
+                    'overridden': original_valid and not is_valid,
                     'sanitized': sanitized_prompt != prompt
                 }
                 
                 if not is_valid:
-                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score:.2f}%')
+                    logger.warning(f'Scanner {scanner_name} failed: score={normalized_score:.3f}, risk_score={risk_score:.2f}%')
+            
+            if override_count > 0:
+                logger.info(f'Input scan: {override_count} scanner(s) overridden due to score threshold')
             
             all_valid = all(results_valid.values())
             return sanitized_prompt, all_valid, scan_results
@@ -682,19 +734,39 @@ class LLMGuardManager:
                 self.scan_fail_fast
             )
             
-            # Convert results to expected format
+            # Convert results to expected format with score threshold override
             scan_results = {}
+            override_count = 0
             for scanner_name, is_valid in results_valid.items():
                 raw_score = results_score.get(scanner_name, 0.0)
-                risk_score = max(0.0, min(raw_score, 1.0)) * 100
+                # Normalize score to 0-1 range
+                normalized_score = max(0.0, min(raw_score, 1.0))
+                risk_score = normalized_score * 100
+                
+                # Apply score threshold override:
+                # If score < threshold, override is_valid to False
+                original_valid = is_valid
+                if is_valid and normalized_score < self.output_score_threshold:
+                    is_valid = False
+                    override_count += 1
+                    logger.info(f'Scanner {scanner_name} overridden to FAIL: score={normalized_score:.3f} < threshold={self.output_score_threshold}')
+                    # Update results_valid for final all_valid check
+                    results_valid[scanner_name] = False
+                
                 scan_results[scanner_name] = {
                     'passed': is_valid,
                     'risk_score': risk_score,
+                    'raw_score': normalized_score,
+                    'threshold': self.output_score_threshold,
+                    'overridden': original_valid and not is_valid,
                     'sanitized': sanitized_output != text
                 }
                 
                 if not is_valid:
-                    logger.warning(f'Scanner {scanner_name} failed: risk_score={risk_score:.2f}%')
+                    logger.warning(f'Scanner {scanner_name} failed: score={normalized_score:.3f}, risk_score={risk_score:.2f}%')
+            
+            if override_count > 0:
+                logger.info(f'Output scan: {override_count} scanner(s) overridden due to score threshold')
             
             all_valid = all(results_valid.values())
             return sanitized_output, all_valid, scan_results
