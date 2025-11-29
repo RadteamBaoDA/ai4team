@@ -173,6 +173,10 @@ Examples:
     if args.disable_guard:
         os.environ['GUARD_ENABLED'] = 'false'
     
+    # Set score threshold environment variables
+    os.environ['LLM_GUARD_INPUT_SCORE_THRESHOLD'] = str(args.input_score_threshold)
+    os.environ['LLM_GUARD_OUTPUT_SCORE_THRESHOLD'] = str(args.output_score_threshold)
+    
     # Print header
     logger.info("=" * 80)
     logger.info("LiteLLM Proxy with Custom Guardrail (LLM Guard)")
@@ -182,6 +186,8 @@ Examples:
     logger.info(f"Worker Processes: {args.workers}")
     logger.info(f"Log Level: {args.log_level}")
     logger.info(f"Guardrail Enabled: {not args.disable_guard}")
+    logger.info(f"Input Score Threshold: {args.input_score_threshold}")
+    logger.info(f"Output Score Threshold: {args.output_score_threshold}")
     logger.info("=" * 80)
     
     # Validate configuration
@@ -219,6 +225,8 @@ Examples:
         logger.info("  ✓ Stream processing (async_post_call_streaming_iterator_hook)")
         logger.info("  ✓ Automatic language detection (7 languages)")
         logger.info("  ✓ 10 security scanners (5 input, 5 output)")
+        logger.info(f"  ✓ Input score threshold: {args.input_score_threshold} (reject if score < threshold)")
+        logger.info(f"  ✓ Output score threshold: {args.output_score_threshold} (reject if score < threshold)")
     
     logger.info("\n[STARTUP] Starting LiteLLM proxy...")
     logger.info("=" * 80)
